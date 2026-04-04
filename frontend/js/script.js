@@ -1,5 +1,5 @@
-import { signInWithGoogle, onAuthStateChanged, auth, db } from "./auth.js";
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { auth, db, signInWithGoogle, onAuthStateChanged } from "./auth.js";
+import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { executePredictionLogic, submitMatchFeedback, fetchOptionsData } from "./prediction-logic.js";
 
 let selectedBadge = "C";
@@ -190,12 +190,12 @@ $(() => {
 
   $("#btn-google-login").on("click", async () => {
     try {
+      showMsg("正在啟動 Google 授權...", false);
       const u = await signInWithGoogle();
-      // Google Login 順利則重新載入確認狀態
-      location.reload(); 
+      // 登入後 onAuthStateChanged 會自動觸發 UI 更新，不需要 reload
     } catch(e) { 
       console.error(e);
-      showMsg("登入或連線失敗", true); 
+      showMsg("登入或連線失敗: " + e.message, true); 
     }
   });
 
@@ -215,19 +215,36 @@ $(() => {
       
       // 即時連線確認角色 (解決 Admin 消失問題)
       try {
-        const userSnap = await getDoc(doc(db, "users", u.uid));
-        const role = userSnap.exists() ? userSnap.data().role : "user";
+        const userRef = doc(db, "users", u.uid);
+        let userSnap = await getDoc(userRef);
+        
+        // 緊急修復：如果使用者文件不存在，自動建立一個預設文件
+        if (!userSnap.exists()) {
+          console.warn("User profile missing locally, auto-provisioning...");
+          const newUser = {
+            id: u.uid,
+            email: u.email,
+            display_name: u.displayName,
+            photo_url: u.photoURL,
+            role: "user", 
+            created_at: new Date().toISOString()
+          };
+          await setDoc(userRef, newUser);
+          userSnap = { data: () => newUser }; // 模擬 snap
+        }
+
+        const role = userSnap.data().role || "user";
         localStorage.setItem("userRole", role);
 
         if (role === "admin") {
           $("#admin-tag-container").html(`
-            <a href="./admin.html" class="flex items-center gap-1 text-[9px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-0.5 rounded-md font-black uppercase tracking-tighter transition-all">
-               <span>Console</span>
-               <svg class="w-2 h-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7-7 7" /></svg>
+            <a href="./admin.html" class="mt-1 flex items-center justify-center gap-1 text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded-full font-black tracking-wider transition-all shadow-lg active:scale-95">
+               <span>進入後台</span>
+               <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7-7 7" /></svg>
             </a>
           `);
         } else {
-          $("#admin-tag-container").html('<p class="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Authorized User</p>');
+          $("#admin-tag-container").html('<p class="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">Authorized User</p>');
         }
       } catch (err) {
         console.error("Role Verification Error:", err);

@@ -9,31 +9,10 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-/** Google 登入，並直接與 Firestore 驗證 (純前端模式) */
+/** Google 登入 (僅負責身份驗證) */
 async function signInWithGoogle() {
   const result = await signInWithPopup(auth, provider);
-  const user = result.user;
-  
-  // 檢查 Firestore 中是否已存在該使用者
-  const userRef = doc(db, "users", user.uid);
-  const userSnap = await getDoc(userRef);
-  
-  if (!userSnap.exists()) {
-    console.log("New user detected, creating profile in Firestore...");
-    const newUser = {
-      id: user.uid,
-      email: user.email,
-      display_name: user.displayName,
-      photo_url: user.photoURL,
-      role: "user",
-      created_at: new Date().toISOString()
-    };
-    await setDoc(userRef, newUser);
-    localStorage.setItem("userRole", "user");
-  } else {
-    localStorage.setItem("userRole", userSnap.data().role || "user");
-  }
-  return user;
+  return result.user;
 }
 
 /** 登出 */
