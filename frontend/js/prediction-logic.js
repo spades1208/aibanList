@@ -107,12 +107,15 @@ export async function executePredictionLogic(mapName, banSurvivors) {
   }
 }
 
+// 預設版本號 (當資料庫 configs/current_status 內容為空時使用)
+const DEFAULT_VERSION = "2024.12.30";
+
 /**
  * 提交戰績回饋
  */
 export async function submitMatchFeedback(mapName, banSurvivors, hunterName, badgeLevel) {
   try {
-    let currentVersion = "unknown";
+    let currentVersion = DEFAULT_VERSION;
     try {
       const configSnap = await getDoc(doc(db, "configs", "current_status"));
       if (configSnap.exists()) currentVersion = configSnap.data().current_version || "unknown";
