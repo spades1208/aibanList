@@ -42,7 +42,16 @@ export function renderOptions(selector, items, placeholder) {
 
   $el.select2({ 
     placeholder, width: '100%', allowClear: true,
-    templateResult: (d) => $(d.element).data('hot') ? $(`<div class="hot-item px-2 py-1">${d.text}</div>`) : d.text
+    templateResult: (data) => {
+      // 如果該選項已被禁用 (互斥)，則隱藏處理
+      if (data.disabled) return null;
+      
+      const $el = $(data.element);
+      if ($el.data('hot')) {
+        return $(`<div class="hot-item px-2 py-1">${data.text}</div>`);
+      }
+      return data.text;
+    }
   });
 }
 
@@ -154,18 +163,26 @@ async function loadInitialData(mapName = null) {
   }
 }
 
-// --- 互斥功能 ---
+// --- 互斥功能 (防止重複選取相同角色) ---
 function updateExclusion() {
   const $selects = $(".survivor-select");
-  const selected = $selects.map((i, el) => $(el).val()).get().filter(v => v);
+  // 收集目前所有已選取的值 (排除空值)
+  const allSelected = $selects.map((i, el) => $(el).val()).get().filter(v => v);
+
   $selects.each(function() {
     const $this = $(this);
-    const myVal = $this.val();
+    const myCurrentVal = $this.val();
+
     $this.find("option").each(function() {
-      const val = $(this).val();
-      if (!val) return;
-      $(this).prop("disabled", selected.includes(val) && val !== myVal);
+      const optVal = $(this).val();
+      if (!optVal) return; 
+      
+      // 如果這個角色被其他位置選走了，就禁用它
+      const isUsedByOthers = allSelected.includes(optVal) && optVal !== myCurrentVal;
+      $(this).prop("disabled", isUsedByOthers);
     });
+
+    // 通知 Select2 重新抓取選項狀態並渲染
     $this.trigger('change.select2');
   });
 }
