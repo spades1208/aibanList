@@ -85,6 +85,13 @@
             <p class="text-[10px] text-slate-500 mt-3 leading-relaxed">提示：更改此處後，所有使用者提交的新數據都會自動標記以此版本名稱。預測功能會優先抓取此版本的數據。</p>
           </div>
           <button id="btn-save-version" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl shadow-xl shadow-indigo-600/20 transition-all">更新部署版本</button>
+          
+          <div class="pt-6 border-t border-white/5">
+            <p class="text-[10px] text-slate-500 mb-3 font-bold uppercase tracking-widest">數據維護</p>
+            <button id="btn-fix-data" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-2xl transition-all text-xs border border-white/5">
+              修復歷史版本數據 (將 2024.12.30 轉為 Season 41)
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -145,14 +152,14 @@
 
   <script type="module">
     import { auth, onAuthStateChanged, logout } from "./js/auth.js";
-    import { fetchUsers, setUserRole, fetchBanlist, fetchRecords, deleteRecord } from "./js/admin.js";
-    import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { fetchUsers, setUserRole, fetchRecords, deleteRecord, updateVersion, fetchCurrentVersion, migrateHistoricalData } from "./js/admin.js";
+    import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
     import { db } from "./js/auth.js";
 
     let state = { currentPage: 1 };
 
-    // --- 1. 堅如磐石的面板切換 (移除 jQuery 依賴，直接操作 DOM) ---
-    function showPanel(name) {
+    // --- 1. 面板切換與數據加載 ---
+    async function showPanel(name) {
       document.querySelectorAll('section[id^="panel-"]').forEach(el => el.style.display = 'none');
       document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
       
@@ -163,9 +170,16 @@
       if (targetNav) targetNav.classList.add('active');
 
       // 觸發載入
-      if (name === 'users') loadUsers();
-      if (name === 'records') loadRecords(1);
+      if (name === 'users') await loadUsers();
+      if (name === 'records') await loadRecords(1);
+      if (name === 'config') {
+        const currentV = await fetchCurrentVersion();
+        document.getElementById("input-version").value = currentV || "";
+      }
     }
+
+    // 將 showPanel 暴露給偵錯（可選）
+    window.showPanel = showPanel;
 
     // 綁定選單事件
     ['users', 'config', 'banlist', 'records'].forEach(name => {
@@ -180,7 +194,6 @@
         return;
       }
 
-      // 即時渲染左下角用戶資訊
       document.getElementById("user-name").textContent = user.displayName || "使用者";
       document.getElementById("user-avatar").src = user.photoURL || "https://ui-avatars.com/api/?name=Admin&background=6366f1&color=fff";
       
@@ -188,46 +201,41 @@
         const userRef = doc(db, "users", user.uid);
         let snap = await getDoc(userRef);
         
-        // 緊急修復：如果文檔不存在，自動建立預設文檔防卡死
         if (!snap.exists()) {
-          console.warn("User profile missing, auto-provisioning...");
           const newUser = {
-            id: user.uid,
-            email: user.email,
-            display_name: user.displayName,
-            photo_url: user.photoURL,
-            role: "user",
-            created_at: new Date().toISOString()
+            id: user.uid, email: user.email, display_name: user.displayName,
+            photo_url: user.photoURL, role: "user", created_at: new Date().toISOString()
           };
-          const { setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
           await setDoc(userRef, newUser);
-          snap = { data: () => newUser }; // 模擬 snap
+          snap = { data: () => newUser };
         }
 
-        const role = (snap.data ? snap.data().role : snap.role) || 'user';
+        const data = snap.data();
+        const role = data.role || 'user';
         const roleEl = document.getElementById("user-role");
         roleEl.textContent = role.toUpperCase();
         
         if (role !== 'admin') {
           roleEl.classList.replace('text-indigo-400', 'text-red-400');
-          // 僅提醒，不強制跳轉以利預覽，但功能會受 Security Rules 保護
-          console.warn("Permission restricted: Current role is", role);
         }
       } catch (err) {
-        console.error("Firestore user check failed:", err);
+        console.error("Auth process error:", err);
       }
 
-      // 預設顯示 Users 面板並載入
-      showPanel('users');
-      initFilters(); 
+      // 預設切換至使用者面板
+      await showPanel('users');
+      await initFilters(); 
     });
 
-    // --- 3. 數據載入與防呆機制 ---
-    window.loadUsers = async function() {
+    // --- 3. 使用者與數據管理功能 ---
+    async function loadUsers() {
       const tbody = document.getElementById("users-tbody");
+      if (!tbody) return;
       tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
       
       const users = await fetchUsers();
+      console.log("Admin UI: Received users list:", users);
+      
       if (!users || users.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">暫無數據</td></tr>';
         return;
@@ -251,16 +259,18 @@
           </td>
         </tr>
       `).join("");
-    };
+    }
 
-    window.changeRole = async function(uid, role) {
-      await setUserRole(uid, role);
-      loadUsers();
-    };
+    async function changeRole(uid, role) {
+      if (await setUserRole(uid, role)) {
+        await loadUsers();
+      }
+    }
 
-    window.loadRecords = async function(page = 1) {
+    async function loadRecords(page = 1) {
       state.currentPage = page;
       const tbody = document.getElementById("records-tbody");
+      if (!tbody) return;
       tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
 
       const mapVal = document.getElementById("filter-map")?.value || "";
@@ -280,7 +290,7 @@
             <td class="px-6 py-5"><span class="px-2 py-1 bg-slate-800 rounded text-[10px] font-black">${r.badge_level || '-'}</span></td>
             <td class="px-6 py-5 text-slate-500 text-[10px] uppercase tracking-tighter">${r.version || '-'}</td>
             <td class="px-6 py-5">
-              <button onclick="window.confirmDelete('${r.id}')" class="text-red-500 hover:text-red-400 p-2">刪除</button>
+              <button onclick="window.confirmDelete('${r.id}')" class="text-red-500 hover:text-red-400 p-2 text-xs font-bold">刪除</button>
             </td>
           </tr>
         `).join("");
@@ -289,32 +299,68 @@
       document.getElementById("page-info").textContent = `Page ${page}`;
       document.getElementById("btn-prev-page").disabled = page === 1;
       document.getElementById("btn-next-page").disabled = records.length < 10;
-    };
-
-    window.confirmDelete = async function(id) {
-      if (confirm("確定刪除這筆戰績？")) {
-        await deleteRecord(id);
-        loadRecords(state.currentPage);
-      }
-    };
-
-    // --- 4. 選項過濾加載 ---
-    async function initFilters() {
-      // 快速寫死幾個常用的，避免後端掛掉時過濾器崩潰
-      const defaults = { maps: ["軍工廠", "紅教堂", "唐人街", "聖心醫院"], hunters: ["歌劇演員", "隱士", "夢之女巫"] };
-      
-      const mapSel = document.getElementById("filter-map");
-      const huntSel = document.getElementById("filter-hunter");
-      if (mapSel) mapSel.innerHTML = '<option value="">所有地圖</option>' + defaults.maps.map(m => `<option value="${m}">${m}</option>`).join('');
-      if (huntSel) huntSel.innerHTML = '<option value="">所有監管者</option>' + defaults.hunters.map(h => `<option value="${h}">${h}</option>`).join('');
     }
 
-    // 事件綁定 (分頁與登出)
+    async function confirmDelete(id) {
+      if (confirm("確定刪除這筆戰績？")) {
+        if (await deleteRecord(id)) {
+          await loadRecords(state.currentPage);
+        }
+      }
+    }
+
+    // 暴露至全域供 HTML 調用
+    window.loadUsers = loadUsers;
+    window.changeRole = changeRole;
+    window.loadRecords = loadRecords;
+    window.confirmDelete = confirmDelete;
+
+    // --- 4. 配置與初始化 ---
+    async function initFilters() {
+      const defaults = { maps: ["軍工廠", "紅教堂", "唐人街", "聖心醫院", "湖景村", "永眠鎮", "月亮河公園", "里奧的回憶"], hunters: ["歌劇演員", "時空之影", "隱士", "夢之女巫"] };
+      const mS = document.getElementById("filter-map");
+      const hS = document.getElementById("filter-hunter");
+      if (mS) mS.innerHTML = '<option value="">所有地圖</option>' + defaults.maps.sort().map(m => `<option value="${m}">${m}</option>`).join('');
+      if (hS) hS.innerHTML = '<option value="">所有監管者</option>' + defaults.hunters.sort().map(h => `<option value="${h}">${h}</option>`).join('');
+    }
+
+    // 事件監聽
     document.getElementById("btn-prev-page")?.addEventListener("click", () => loadRecords(state.currentPage - 1));
     document.getElementById("btn-next-page")?.addEventListener("click", () => loadRecords(state.currentPage + 1));
     document.getElementById("filter-map")?.addEventListener("change", () => loadRecords(1));
     document.getElementById("filter-hunter")?.addEventListener("change", () => loadRecords(1));
     document.getElementById("btn-logout")?.addEventListener("click", () => logout());
+    
+    document.getElementById("btn-save-version")?.addEventListener("click", async () => {
+      const v = document.getElementById("input-version").value;
+      if (await updateVersion(v)) {
+        alert("版本已成功更新為：" + v);
+      } else {
+        alert("更新失敗，請檢查權限。");
+      }
+    });
+
+    document.getElementById("btn-fix-data")?.addEventListener("click", async () => {
+      if (!confirm("確定要將所有 2024.12.30 和 unknown 版本號統一修復為 Season 41 嗎？")) return;
+      const btn = document.getElementById("btn-fix-data");
+      btn.disabled = true;
+      btn.textContent = "修復中...";
+      
+      try {
+        const count = await migrateHistoricalData();
+        alert(`成功更新了 ${count} 筆戰績版本號！`);
+        btn.textContent = "修復完成";
+      } catch (e) {
+        alert("修復過程中發生錯誤，請查看 Console。");
+        btn.textContent = "修復失敗";
+      } finally {
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = "修復歷史版本數據 (將 2024.12.30 轉為 Season 41)";
+        }, 3000);
+      }
+    });
   </script>
 </body>
 </html>
+

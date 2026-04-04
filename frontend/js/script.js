@@ -1,6 +1,132 @@
 import { auth, db, signInWithGoogle, onAuthStateChanged } from "./auth.js";
-import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { executePredictionLogic, submitMatchFeedback, fetchOptionsData } from "./prediction-logic.js";
+import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+// --- 核心演算數據 (原本在 main.py 的 calculate_prediction) ---
+const MAP_BASE_SCORES = {
+  "里奧的回憶": { "隱士": 10.0, "歌劇演員": 10.0, "『使徒』": 5.0 },
+  "永眠鎮": { "隱士": 10.0, "宿傘之魂": 8.0, "守夜人": 8.0 },
+  "紅教堂": { "紅蝶": 10.0, "守夜人": 10.0, "漁女": 5.0 },
+  "聖心醫院": { "時空之影": 10.0, "雕刻家": 10.0, "夢之女巫": 5.0 },
+  "軍工廠": { "歌劇演員": 10.0, "漁女": 10.0, "廠長": 5.0 },
+  "月亮河公園": { "『傑克』": 8.0, "蜘蛛": 8.0, "宿傘之魂": 5.0 },
+  "湖景村": { "漁女": 12.0, "黃衣之主": 8.0, "『使徒』": 5.0 },
+};
+const BADGE_WEIGHTS = { "S": 5.0, "A": 3.0, "B": 1.5, "C": 1.0, "unknown": 1.0 };
+const MATCH_WEIGHTS = { 3: 1.0, 2: 0.6, 1: 0.3 };
+window.siteVersion = "Season 41"; // 全域版本號預設為 Season 41
+
+// 安全保底：基本數據庫 (確保 Firebase 沒連上也能顯示 UI)
+const FALLBACK_MAPS = ["軍工廠", "紅教堂", "聖心醫院", "湖景村", "永眠鎮", "月亮河公園", "唐人街", "里奧的回憶"];
+const FALLBACK_SURVIVORS = ["古董商", "空軍", "傭兵", "先知", "咒術師", "雜技演員", "小女孩", "昆蟲學者", "心理學家", "病患", "調酒師", "入殮師", "勘探員", "大副", "野人", "守墓人", "舞女", "機械師", "牛仔", "盲女", "祭司", "前鋒", "醫生", "律師", "慈善家", "園丁", "冒險家", "魔術師", "教授"];
+const FALLBACK_HUNTERS = ["歌劇演員", "時空之影", "隱士", "夢之女巫", "雕刻家", "紅蝶", "漁女", "守夜人", "宿傘之魂", "『公投』", "『使徒』", "蜘蛛", "『傑克』", "黃衣之主", "紅夫人", "愛哭鬼", "瘋眼", "攝影師", "蠟像師", "噩夢", "小提琴家", "破輪", "博士", "記錄員", "廠長", "鹿頭", "小丑"];
+
+/** 執行加權推演預測 (原本的 API /predict 邏輯) */
+export async function executePredictionLogic(mapName, banSurvivors) {
+  if (!mapName) return null;
+  try {
+    const q = query(collection(db, "match_records"), where("map_name", "==", mapName));
+    const querySnapshot = await getDocs(q);
+    let counts = {};
+    const baseData = MAP_BASE_SCORES[mapName] || {};
+    for (const [hunter, score] of Object.entries(baseData)) { counts[hunter] = parseFloat(score); }
+    let totalScore = Object.values(counts).reduce((sum, s) => sum + s, 0);
+    const inputBans = new Set(banSurvivors.filter(b => b));
+    let maxMatchesFound = 0;
+
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      const recordBans = new Set(data.ban_survivors || []);
+      let matchCount = 0;
+      for (const ban of inputBans) { if (recordBans.has(ban)) matchCount++; }
+      if (matchCount > 0 || inputBans.size === 0) {
+        const weightTier = inputBans.size > 0 ? (MATCH_WEIGHTS[matchCount] || 1.0) : 1.0;
+        if (matchCount > maxMatchesFound) maxMatchesFound = matchCount;
+        const hunter = data.hunter_name || "未知監管者";
+        const badge = data.badge_level || "unknown";
+        const dataContribution = weightTier * (BADGE_WEIGHTS[badge] || 1.0);
+        counts[hunter] = (counts[hunter] || 0.0) + dataContribution;
+        totalScore += dataContribution;
+      }
+    });
+
+    const results = Object.entries(counts).filter(([_, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([hName, score]) => {
+      const perc = totalScore > 0 ? (score / totalScore) * 100 : 0;
+      return { hunter_name: hName, score: parseFloat(score.toFixed(1)), percentage: `${perc.toFixed(1)}%` };
+    });
+
+    let precisionLabel = "數據精準 (Tier 1)";
+    if (maxMatchesFound === 2) precisionLabel = "廣泛參考 (Tier 2)";
+    if (maxMatchesFound === 1) precisionLabel = "趨勢預估 (Tier 3)";
+    if (inputBans.size === 0) precisionLabel = "地圖原生排名";
+
+    return { predictions: results, total_score: parseFloat(totalScore.toFixed(1)), precision_label: precisionLabel };
+  } catch (err) { console.error("Prediction Logic Error:", err); return { predictions: [], precision_label: "連線異常" }; }
+}
+
+/** 提交戰績回饋 (原本的 API /submit-match 邏輯) */
+export async function submitMatchFeedback(mapName, banSurvivors, hunterName, badgeLevel) {
+  try {
+    // 強制使用全域變數，若不存在則依序保底
+    const finalVersion = window.siteVersion || $("#app-version-display").text() || "Season 41";
+    
+    await addDoc(collection(db, "match_records"), {
+      map_name: mapName, ban_survivors: banSurvivors, hunter_name: hunterName,
+      version: finalVersion, badge_level: badgeLevel || "C",
+      reported_at: serverTimestamp(), source: "feedback_frontend"
+    });
+    return true;
+  } catch (err) { console.error("Submit Feedback Error:", err); throw err; }
+}
+
+/** 抓取全量資料 (原本的 API /options 邏輯) */
+export async function fetchOptionsData(activeMapName = "") {
+  try {
+    const [mapsSnap, survsSnap, huntsSnap, recordsSnap] = await Promise.all([
+      getDocs(collection(db, "maps")), getDocs(collection(db, "survivors")),
+      getDocs(collection(db, "hunters")), getDocs(collection(db, "match_records"))
+    ]).catch(() => [null, null, null, null]);
+
+    let maps = mapsSnap ? mapsSnap.docs.map(d => d.data().name).filter(n => n) : [];
+    if (maps.length === 0) maps = FALLBACK_MAPS;
+    
+    let survivorsDict = {};
+    if (!survsSnap || survsSnap.empty) {
+      FALLBACK_SURVIVORS.forEach(name => survivorsDict[name] = { name, is_hot: false });
+    } else {
+      survsSnap.docs.forEach(d => { const n = d.data().name; survivorsDict[n] = { name: n, is_hot: false }; });
+    }
+
+    let huntersDict = {}; 
+    if (!huntsSnap || huntsSnap.empty) {
+      FALLBACK_HUNTERS.forEach(name => huntersDict[name] = { name, is_hot: false });
+    } else {
+      huntsSnap.docs.forEach(d => { const n = d.data().name; huntersDict[n] = { name: n, is_hot: false }; });
+    }
+
+    if (recordsSnap) {
+      let mC = {s:{}, h:{}}, gC = {s:{}, h:{}};
+      recordsSnap.docs.forEach(d => {
+        const da = d.data(), mN = da.map_name, hN = da.hunter_name, bans = da.ban_survivors || [];
+        if (hN) gC.h[hN] = (gC.h[hN]||0)+1;
+        bans.forEach(b => gC.s[b] = (gC.s[b]||0)+1);
+        if (activeMapName && mN === activeMapName) {
+           if (hN) mC.h[hN] = (mC.h[hN]||0)+1;
+           bans.forEach(b => mC.s[b] = (mC.s[b]||0)+1);
+        }
+      });
+      const markHot = (dict, m, g) => {
+        let hot = Object.entries(Object.values(m).reduce((a,b)=>a+b,0)>=3 ? m : g).sort((a,b)=>b[1]-a[1]).slice(0,5);
+        hot.forEach(([n]) => { if(dict[n]) dict[n].is_hot = true; });
+      };
+      markHot(survivorsDict, mC.s, gC.s);
+      markHot(huntersDict, mC.h, gC.h);
+    }
+
+    return { maps: [...new Set(maps)].sort(), survivors: Object.values(survivorsDict), hunters: Object.values(huntersDict) };
+  } catch (err) {
+    return { maps: FALLBACK_MAPS, survivors: FALLBACK_SURVIVORS.map(n=>({name:n,is_hot:false})), hunters: FALLBACK_HUNTERS.map(n=>({name:n,is_hot:false})) };
+  }
+}
 
 let selectedBadge = "C";
 let predictTimeout = null;
@@ -147,6 +273,23 @@ function bindFeedbackEvents(topHunter, map, bans) {
 
 async function loadInitialData(mapName = null) {
   try {
+    // 1. 初始化系統配置 (僅首次載入)
+    if (!mapName) {
+      try {
+        const configSnap = await getDoc(doc(db, "configs", "current_status"));
+        if (configSnap.exists()) {
+          const v = configSnap.data().current_version;
+          window.siteVersion = v || "Season 41";
+          $("#app-version-display").text(window.siteVersion);
+        } else {
+          $("#app-version-display").text(window.siteVersion); // 使用 Season 41 預設值
+        }
+      } catch (e) { 
+        console.warn("Version fetch failed, using Season 41:", e);
+        $("#app-version-display").text(window.siteVersion);
+      }
+    }
+
     const d = await fetchOptionsData(mapName);
     
     if (!mapName && d.maps) {
