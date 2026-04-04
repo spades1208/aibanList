@@ -1,0 +1,113 @@
+# ================================
+# 🔥 Firebase / 敏感金鑰 (最重要！)
+# ================================
+*.json
+.env
+.env.*
+!package.json
+!package-lock.json
+serviceAccountKey.json
+firebase-adminsdk*.json
+google-services.json
+GoogleService-Info.plist
+
+# 前端金鑰檔案
+*.key.js
+ai-web.key.js
+
+# ================================
+# 🐍 Python
+# ================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# 虛擬環境
+.venv/
+venv/
+env/
+ENV/
+.env/
+Pipfile.lock
+
+# 套件與分佈
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Pytest / 測試
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# mypy / linting
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ================================
+# 🛠️ IDE / 編輯器
+# ================================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# ================================
+# 💻 作業系統產生的檔案
+# ================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ================================
+# 📦 Node.js (如果有前端)
+# ================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ================================
+# 📋 其他
+# ================================
+*.log
+*.tmp
+*.bak
+*.orig

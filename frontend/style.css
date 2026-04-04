@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap');
+
+/* 字體與極致深色 */
+:root { 
+  --bg-main: #0a0a0a;
+  --bg-card: #121212;
+  --bg-input: #252525 !important; 
+  --accent: #6366f1;
+  --text: #ffffff !important;
+  --border-color: #444 !important;
+}
+
+* { font-family: 'Outfit', sans-serif; box-sizing: border-box !important; }
+
+html, body { 
+  color-scheme: dark !important; 
+  background-color: var(--bg-main) !important; 
+  color: var(--text) !important; 
+  margin: 0; 
+  min-height: 100vh; 
+  overflow-x: hidden; 
+}
+
+.glass { 
+  background: var(--bg-card) !important; 
+  border: 1px solid rgba(255,255,255,0.05); 
+}
+
+/* 專業分欄佈局 (Dual Layout) */
+.dual-layout { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 30px; 
+  width: 100%; 
+  max-width: 1200px; 
+}
+
+@media (min-width: 1024px) {
+  .dual-layout { 
+    flex-direction: row; 
+    align-items: stretch; 
+  }
+  .side-input { flex: 0 0 380px; }
+  .side-output { flex: 1; min-height: 600px; }
+}
+
+/* 矩形框組件重構 */
+.menu-block { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 8px; 
+  margin-bottom: 20px !important; 
+  position: relative; 
+}
+
+.menu-block label { 
+  font-size: 0.9rem; 
+  font-weight: 800; 
+  color: #64748b; 
+  text-transform: uppercase; 
+  letter-spacing: 0.1em; 
+}
+
+/* Select2 矩形化 */
+.select2-container .select2-selection--single {
+  background-color: #1e1e1e !important; 
+  border: 1px solid #333 !important; 
+  border-radius: 12px !important;
+  height: 52px !important; 
+  display: flex; 
+  align-items: center; 
+  position: relative !important;
+}
+
+.select2-container--default .select2-selection--single .select2-selection__rendered {
+  color: #fff !important; 
+  padding-left: 15px !important; 
+  line-height: 52px !important;
+}
+
+/* 清除按鈕 X */
+.select2-selection__clear {
+  position: absolute !important; 
+  right: 35px !important; 
+  top: 50% !important; 
+  transform: translateY(-50%) !important;
+  font-size: 18px !important; 
+  color: #666 !important; 
+  z-index: 10;
+}
+
+/* 反饋嵌入樣式 */
+.feedback-inline { 
+  background: rgba(99, 102, 241, 0.05); 
+  border: 1px dashed rgba(99, 102, 241, 0.2); 
+  border-radius: 24px; 
+  padding: 20px; 
+  margin: 15px 0; 
+}
+
+/* 徽章大方塊 (Grid) */
+.badge-grid { 
+  display: grid; 
+  grid-template-columns: repeat(4, 1fr); 
+  gap: 10px; 
+}
+
+.badge-btn {
+  aspect-ratio: 1/1; 
+  background: #1a1a1a; 
+  border: 1px solid #333; 
+  border-radius: 15px;
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  justify-content: center; 
+  transition: 0.2s;
+}
+
+.badge-btn.active { 
+  background: var(--accent); 
+  border-color: var(--accent); 
+  color: white; 
+}
+
+.hot-item { 
+  background: rgba(255, 140, 0, 0.1) !important; 
+  color: #ff8c00 !important; 
+  font-weight: 800 !important; 
+}
+
+.select2-dropdown { 
+  background: #1e1e1e !important; 
+  border: 1px solid #333 !important; 
+  border-radius: 12px !important; 
+}

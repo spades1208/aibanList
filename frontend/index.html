@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>aiBanlist Elite — 高效戰術分析版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- jQuery & Select2 -->
+  <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="p-4 md:p-12 flex justify-center">
+
+  <div class="main-wrapper w-full flex flex-col items-center">
+    <header class="mb-10 w-full max-w-[1200px] flex items-center justify-between">
+      <div>
+        <h1 class="text-4xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-500">aiBanlist <span class="text-indigo-500">ELITE</span></h1>
+        <p class="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em] mt-1">Real-time Tactical Inference Engine</p>
+      </div>
+      
+      <!-- User Info Area -->
+      <div id="user-profile" class="hidden flex items-center gap-4">
+        <div class="text-right">
+          <p id="profile-name" class="text-sm font-bold text-white">—</p>
+          <div id="admin-tag-container"></div>
+        </div>
+        <img id="profile-avatar" src="" class="w-10 h-10 rounded-full border border-white/10 shadow-lg" />
+        <button id="btn-header-logout" class="p-2 text-slate-500 hover:text-white transition-colors">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="login-section" class="glass p-12 rounded-[3rem] text-center w-full max-w-md shadow-2xl">
+      <p class="text-slate-400 mb-8 text-sm">請進行專家級帳號驗證以啟動演算</p>
+      <button id="btn-google-login" class="bg-white hover:bg-slate-100 text-slate-900 font-black py-4 px-8 rounded-2xl flex items-center gap-3 transition-all shadow-2xl shadow-white/10 active:scale-95">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" class="w-5 h-5" alt="Google">
+        GOOGLE 帳號授權
+      </button>
+    </div>
+
+    <!-- 主功能區 (一屏化佈局) -->
+    <div id="main-feature-section" class="hidden dual-layout w-full">
+      
+      <!-- 右欄（在小螢幕時置頂優先顯示）：分析報告區 -->
+      <div class="side-output order-1 md:order-2">
+        <div id="predict-results" class="hidden h-full flex flex-col">
+          <div class="flex items-center justify-between mb-6 px-4">
+            <h3 class="text-xl font-bold text-indigo-400">當前演算報告</h3>
+            <span id="precision-tag" class="text-[10px] bg-indigo-500/20 text-indigo-300 px-3 py-1 rounded-full font-black uppercase">地圖原生排名</span>
+          </div>
+
+          <div id="results-list" class="space-y-4"></div>
+          
+          <!-- 空白佔位：預設狀態 -->
+          <div id="results-placeholder" class="hidden flex-1 glass rounded-[2.5rem] flex items-center justify-center border-dashed border-slate-800">
+            <p class="text-slate-600 font-bold uppercase tracking-widest text-xs">Waiting for Map Data</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 左欄：即時輸入區 -->
+      <div class="side-input order-2 md:order-1">
+        <div class="glass p-8 rounded-[2.5rem] shadow-2xl sticky top-8">
+          <div class="menu-block">
+            <label>1. 定位戰地地圖</label>
+            <select id="predict-map" class="w-full"></select>
+          </div>
+          
+          <div id="ban-container" class="space-y-2 opacity-50 pointer-events-none transition-all duration-500">
+            <div class="menu-block">
+              <label>求生者 BANS (1)</label>
+              <select class="survivor-select w-full" data-placeholder="(無 Ban 位)"></select>
+            </div>
+            <div class="menu-block">
+              <label>求生者 BANS (2)</label>
+              <select class="survivor-select w-full" data-placeholder="(無 Ban 位)"></select>
+            </div>
+            <div class="menu-block">
+              <label>求生者 BANS (3)</label>
+              <select class="survivor-select w-full" data-placeholder="(無 Ban 位)"></select>
+            </div>
+          </div>
+          
+          <div class="mt-8 pt-6 border-t border-white/5">
+            <p class="text-[10px] text-slate-600 uppercase font-black tracking-widest text-center">自動感應推演中</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    
+    <div id="status-msg" class="hidden fixed bottom-6 right-6 px-8 py-5 rounded-3xl glass text-sm font-bold shadow-2xl z-50"></div>
+  </div>
+
+  <script type="module" src="./js/script.js"></script>
+</body>
+</html>

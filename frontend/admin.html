@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>aiBanlist — 後台管理中心</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    * { font-family: 'Inter', sans-serif; }
+    .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
+    .sidebar-item { transition: all .15s; border-left: 3px solid transparent; }
+    .sidebar-item:hover, .sidebar-item.active { background: rgba(99,102,241,0.15); border-left: 3px solid #6366f1; color: white !important; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-300 flex">
+
+  <!-- Sidebar -->
+  <aside class="w-64 min-h-screen border-r border-white/5 flex-shrink-0 flex flex-col py-8 px-4 gap-2">
+    <div class="flex items-center gap-3 px-3 mb-10">
+      <div class="w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/20">
+        <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+      </div>
+      <span class="text-xl font-black text-white tracking-tight">Console</span>
+    </div>
+
+    <button id="nav-users" class="sidebar-item active text-left px-5 py-3 rounded-xl text-sm font-bold text-slate-400 flex items-center gap-3">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+      使用者權限
+    </button>
+    <button id="nav-config" class="sidebar-item text-left px-5 py-3 rounded-xl text-sm font-bold text-slate-400 flex items-center gap-3">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+      系統配置
+    </button>
+    <button id="nav-banlist" class="sidebar-item text-left px-5 py-3 rounded-xl text-sm font-bold text-slate-400 flex items-center gap-3">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+      黑名單
+    </button>
+    <button id="nav-records" class="sidebar-item text-left px-5 py-3 rounded-xl text-sm font-bold text-slate-400 flex items-center gap-3">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" /></svg>
+      戰績數據庫
+    </button>
+
+    <div class="mt-auto px-4 border-t border-white/5 pt-6">
+      <div class="flex items-center gap-3 mb-6">
+        <img id="user-avatar" src="" class="w-10 h-10 rounded-full border border-white/10" />
+        <div class="overflow-hidden">
+          <p id="user-name" class="text-sm font-bold text-white truncate">—</p>
+          <p id="user-role" class="text-[10px] text-indigo-400 uppercase tracking-widest font-black">Admin</p>
+        </div>
+      </div>
+      <button id="btn-logout" class="w-full py-3 rounded-xl text-xs font-bold text-slate-500 hover:text-white hover:bg-white/5 border border-transparent hover:border-white/5 transition-all">SIGN OUT</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 p-10 overflow-y-auto">
+    <!-- 使用者列表 -->
+    <section id="panel-users" class="space-y-6">
+      <div class="flex items-center justify-between">
+        <h2 class="text-3xl font-black text-white">使用者管理</h2>
+        <button onclick="loadUsers()" class="p-2 text-slate-500 hover:text-white transition-colors"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>
+      </div>
+      <div class="glass rounded-3xl overflow-hidden border border-white/5">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="bg-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+              <th class="px-6 py-4">Identity</th><th class="px-6 py-4">Auth</th><th class="px-6 py-4">Role</th><th class="px-6 py-4">Action</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 系統配置 -->
+    <section id="panel-config" class="hidden space-y-6">
+      <h2 class="text-3xl font-black text-white">系統發佈配置</h2>
+      <div class="max-w-md glass p-8 rounded-[2rem] border border-indigo-500/20">
+        <div class="space-y-6">
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-3">當前全局版本名稱</label>
+            <input id="input-version" type="text" placeholder="例如: Season 41" class="w-full bg-slate-900 border border-slate-800 rounded-2xl px-5 py-4 text-white focus:border-indigo-500 transition-all font-medium" />
+            <p class="text-[10px] text-slate-500 mt-3 leading-relaxed">提示：更改此處後，所有使用者提交的新數據都會自動標記以此版本名稱。預測功能會優先抓取此版本的數據。</p>
+          </div>
+          <button id="btn-save-version" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl shadow-xl shadow-indigo-600/20 transition-all">更新部署版本</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 黑名單 -->
+    <section id="panel-banlist" class="hidden space-y-6">
+      <h2 class="text-3xl font-black text-white">戰損黑名單</h2>
+      <div class="glass rounded-3xl overflow-hidden border border-white/5">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="bg-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+              <th class="px-6 py-4">UID</th><th class="px-6 py-4">Reason</th><th class="px-6 py-4">Status</th>
+            </tr>
+          </thead>
+          <tbody id="banlist-tbody" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 戰績數據庫 -->
+    <section id="panel-records" class="hidden space-y-6">
+      <div class="flex items-center justify-between">
+        <h2 class="text-3xl font-black text-white">戰績管理系統</h2>
+        <div class="flex gap-4">
+           <select id="filter-map" class="bg-slate-900 border border-white/5 rounded-xl text-xs px-4 py-2 text-slate-300 focus:outline-none focus:border-indigo-500"></select>
+           <select id="filter-hunter" class="bg-slate-900 border border-white/5 rounded-xl text-xs px-4 py-2 text-slate-300 focus:outline-none focus:border-indigo-500"></select>
+        </div>
+      </div>
+      
+      <div class="glass rounded-3xl overflow-hidden border border-white/5">
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr class="bg-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+              <th class="px-6 py-4">地圖</th>
+              <th class="px-6 py-4">Bans</th>
+              <th class="px-6 py-4">監管者</th>
+              <th class="px-6 py-4">徽章</th>
+              <th class="px-6 py-4">版本</th>
+              <th class="px-6 py-4">操作</th>
+            </tr>
+          </thead>
+          <tbody id="records-tbody" class="divide-y divide-white/5"></tbody>
+        </table>
+      </div>
+
+      <!-- 分頁控制 -->
+      <div class="flex items-center justify-center gap-6 mt-4">
+        <button id="btn-prev-page" class="p-3 rounded-xl glass hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition-all">
+          <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+        </button>
+        <span id="page-info" class="text-xs font-black text-slate-500 uppercase tracking-widest">Page 1</span>
+        <button id="btn-next-page" class="p-3 rounded-xl glass hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none transition-all">
+          <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { auth, onAuthStateChanged, logout } from "./js/auth.js";
+    import { fetchUsers, setUserRole, fetchBanlist, fetchRecords, deleteRecord } from "./js/admin.js";
+    import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { db } from "./js/auth.js";
+
+    let state = { currentPage: 1 };
+
+    // --- 1. 堅如磐石的面板切換 (移除 jQuery 依賴，直接操作 DOM) ---
+    function showPanel(name) {
+      document.querySelectorAll('section[id^="panel-"]').forEach(el => el.style.display = 'none');
+      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+      
+      const targetPanel = document.getElementById(`panel-${name}`);
+      const targetNav = document.getElementById(`nav-${name}`);
+      
+      if (targetPanel) targetPanel.style.display = 'block';
+      if (targetNav) targetNav.classList.add('active');
+
+      // 觸發載入
+      if (name === 'users') loadUsers();
+      if (name === 'records') loadRecords(1);
+    }
+
+    // 綁定選單事件
+    ['users', 'config', 'banlist', 'records'].forEach(name => {
+      const btn = document.getElementById(`nav-${name}`);
+      if (btn) btn.addEventListener('click', () => showPanel(name));
+    });
+
+    // --- 2. 身份與權限加載 ---
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        window.location.href = "./index.html";
+        return;
+      }
+
+      // 即時渲染左下角用戶資訊
+      document.getElementById("user-name").textContent = user.displayName || "使用者";
+      document.getElementById("user-avatar").src = user.photoURL || "https://ui-avatars.com/api/?name=Admin&background=6366f1&color=fff";
+      
+      try {
+        const userRef = doc(db, "users", user.uid);
+        let snap = await getDoc(userRef);
+        
+        // 緊急修復：如果文檔不存在，自動建立預設文檔防卡死
+        if (!snap.exists()) {
+          console.warn("User profile missing, auto-provisioning...");
+          const newUser = {
+            id: user.uid,
+            email: user.email,
+            display_name: user.displayName,
+            photo_url: user.photoURL,
+            role: "user",
+            created_at: new Date().toISOString()
+          };
+          const { setDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+          await setDoc(userRef, newUser);
+          snap = { data: () => newUser }; // 模擬 snap
+        }
+
+        const role = (snap.data ? snap.data().role : snap.role) || 'user';
+        const roleEl = document.getElementById("user-role");
+        roleEl.textContent = role.toUpperCase();
+        
+        if (role !== 'admin') {
+          roleEl.classList.replace('text-indigo-400', 'text-red-400');
+          // 僅提醒，不強制跳轉以利預覽，但功能會受 Security Rules 保護
+          console.warn("Permission restricted: Current role is", role);
+        }
+      } catch (err) {
+        console.error("Firestore user check failed:", err);
+      }
+
+      // 預設顯示 Users 面板並載入
+      showPanel('users');
+      initFilters(); 
+    });
+
+    // --- 3. 數據載入與防呆機制 ---
+    window.loadUsers = async function() {
+      const tbody = document.getElementById("users-tbody");
+      tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
+      
+      const users = await fetchUsers();
+      if (!users || users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">暫無數據</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = users.map(u => `
+        <tr class="transition-colors hover:bg-white/[0.02]">
+          <td class="px-6 py-5">
+            <p class="text-white font-bold">${u.display_name || '未命名'}</p>
+            <p class="text-[10px] text-slate-500 font-mono">${u.id}</p>
+          </td>
+          <td class="px-6 py-5 text-slate-400">${u.email}</td>
+          <td class="px-6 py-5">
+            <span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 rounded-lg font-black text-[10px] uppercase">${u.role || 'user'}</span>
+          </td>
+          <td class="px-6 py-5">
+            <select onchange="window.changeRole('${u.id}', this.value)" class="bg-slate-900 border border-slate-800 rounded-lg text-xs p-1 focus:outline-none">
+              <option value="user" ${u.role==='user'?'selected':''}>User</option>
+              <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+            </select>
+          </td>
+        </tr>
+      `).join("");
+    };
+
+    window.changeRole = async function(uid, role) {
+      await setUserRole(uid, role);
+      loadUsers();
+    };
+
+    window.loadRecords = async function(page = 1) {
+      state.currentPage = page;
+      const tbody = document.getElementById("records-tbody");
+      tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
+
+      const mapVal = document.getElementById("filter-map")?.value || "";
+      const hunterVal = document.getElementById("filter-hunter")?.value || "";
+
+      const res = await fetchRecords(page, mapVal, hunterVal);
+      const records = res.records || [];
+
+      if (records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">暫無戰績數據</td></tr>';
+      } else {
+        tbody.innerHTML = records.map(r => `
+          <tr class="transition-colors hover:bg-white/[0.02]">
+            <td class="px-6 py-5 text-white font-medium">${r.map_name || '未知'}</td>
+            <td class="px-6 py-5 text-slate-400 text-xs">${(r.ban_survivors || []).join(', ') || '無'}</td>
+            <td class="px-6 py-5 text-indigo-300 font-bold">${r.hunter_name || '未記錄'}</td>
+            <td class="px-6 py-5"><span class="px-2 py-1 bg-slate-800 rounded text-[10px] font-black">${r.badge_level || '-'}</span></td>
+            <td class="px-6 py-5 text-slate-500 text-[10px] uppercase tracking-tighter">${r.version || '-'}</td>
+            <td class="px-6 py-5">
+              <button onclick="window.confirmDelete('${r.id}')" class="text-red-500 hover:text-red-400 p-2">刪除</button>
+            </td>
+          </tr>
+        `).join("");
+      }
+
+      document.getElementById("page-info").textContent = `Page ${page}`;
+      document.getElementById("btn-prev-page").disabled = page === 1;
+      document.getElementById("btn-next-page").disabled = records.length < 10;
+    };
+
+    window.confirmDelete = async function(id) {
+      if (confirm("確定刪除這筆戰績？")) {
+        await deleteRecord(id);
+        loadRecords(state.currentPage);
+      }
+    };
+
+    // --- 4. 選項過濾加載 ---
+    async function initFilters() {
+      // 快速寫死幾個常用的，避免後端掛掉時過濾器崩潰
+      const defaults = { maps: ["軍工廠", "紅教堂", "唐人街", "聖心醫院"], hunters: ["歌劇演員", "隱士", "夢之女巫"] };
+      
+      const mapSel = document.getElementById("filter-map");
+      const huntSel = document.getElementById("filter-hunter");
+      if (mapSel) mapSel.innerHTML = '<option value="">所有地圖</option>' + defaults.maps.map(m => `<option value="${m}">${m}</option>`).join('');
+      if (huntSel) huntSel.innerHTML = '<option value="">所有監管者</option>' + defaults.hunters.map(h => `<option value="${h}">${h}</option>`).join('');
+    }
+
+    // 事件綁定 (分頁與登出)
+    document.getElementById("btn-prev-page")?.addEventListener("click", () => loadRecords(state.currentPage - 1));
+    document.getElementById("btn-next-page")?.addEventListener("click", () => loadRecords(state.currentPage + 1));
+    document.getElementById("filter-map")?.addEventListener("change", () => loadRecords(1));
+    document.getElementById("filter-hunter")?.addEventListener("change", () => loadRecords(1));
+    document.getElementById("btn-logout")?.addEventListener("click", () => logout());
+  </script>
+</body>
+</html>
