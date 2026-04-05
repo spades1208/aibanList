@@ -1,124 +1,231 @@
-import { db } from "./auth.js";
+import { auth, db } from "./auth.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { collection, getDocs, doc, getDoc, setDoc, updateDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-/** 取得當前版本 (遷移至 Cloudflare API) */
-export async function fetchCurrentVersion() {
+// --- 全域狀態 ---
+let currentTab = "users";
+let currentOffset = 0;
+let isFetching = false;
+
+// --- API 函數 (D1 / Config) ---
+
+async function fetchCurrentVersion() {
   try {
     const res = await fetch('/api/options');
-    if (!res.ok) throw new Error();
     const data = await res.json();
     return data.version || "Season 41";
-  } catch (e) { 
-    console.warn("fetchCurrentVersion failed, using fallback.");
-    return "Season 41"; 
-  }
+  } catch (e) { return "Season 41"; }
 }
 
-/** 更新目前版本 (遷移至 Cloudflare API) */
-export async function updateVersion(newVersion) {
+async function updateVersionAPI(newVersion) {
   try {
     const res = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ current_version: newVersion })
     });
-    if (!res.ok) throw new Error("Update Failed");
-    return true;
-  } catch (e) { 
-    console.error("updateVersion error:", e); 
-    return false; 
-  }
+    return res.ok;
+  } catch (e) { return false; }
 }
 
-/** 數據遷移：將舊版本號統一更正為 Season 41 (保留為 Firestore 維護工具) */
-export async function migrateHistoricalData() {
+async function fetchRecordsAPI(offset = 0, map = "", hunter = "") {
   try {
-    const colRef = collection(db, "match_records");
-    const snapshots = await Promise.all([
-      getDocs(query(colRef, where("version", "==", "2024.12.30"))),
-      getDocs(query(colRef, where("version", "==", "unknown")))
-    ]);
-    
-    let count = 0;
-    for (const snap of snapshots) {
-      if (snap.empty) continue;
-      for (const d of snap.docs) {
-        await updateDoc(doc(db, "match_records", d.id), { version: "Season 41" });
-        count++;
-      }
-    }
-    return count;
-  } catch (e) { 
-    console.error("Migration error:", e); 
-    return 0; 
-  }
+    const url = new URL('/api/match', window.location.origin);
+    url.searchParams.set("limit", 15);
+    url.searchParams.set("offset", offset);
+    if (map) url.searchParams.set("map", map);
+    if (hunter) url.searchParams.set("hunter", hunter);
+
+    const res = await fetch(url);
+    return await res.json();
+  } catch (e) { return { records: [], hasMore: false }; }
 }
 
-// ── 使用者管理 (保留在 Firestore) ────────────────────────────
+async function deleteRecordAPI(id) {
+  try {
+    const res = await fetch(`/api/match?id=${id}`, { method: 'DELETE' });
+    return res.ok;
+  } catch (e) { return false; }
+}
 
-export async function fetchUsers() {
+// --- Firestore 函數 (Users) ---
+
+async function fetchUsers() {
   try {
     const snap = await getDocs(collection(db, "users"));
-    return snap.docs.map(d => ({id: d.id, ...d.data()}));
-  } catch (e) { 
-    console.error("fetchUsers error:", e); 
-    return []; 
-  }
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { return []; }
 }
 
-export async function updateUserRole(userId, newRole) {
+async function updateUserRole(userId, newRole) {
   try {
     await updateDoc(doc(db, "users", userId), { role: newRole });
     return true;
-  } catch (e) { 
-    console.error("updateUserRole error:", e); 
-    return false; 
-  }
+  } catch (e) { return false; }
 }
 
-// ── 戰績數據管理 (遷移至 Cloudflare D1 API) ──────────────────────────
+// --- UI 渲染邏輯 ---
 
-let currentOffset = 0;
+function showSection(tabId) {
+  currentTab = tabId;
+  $(".admin-section").addClass("hidden");
+  $(`#section-${tabId}`).removeClass("hidden");
+  $(".menu-item").removeClass("bg-indigo-500/10 text-indigo-400 border-indigo-500").addClass("text-slate-400 border-transparent");
+  $(`[data-tab="${tabId}"]`).addClass("bg-indigo-500/10 text-indigo-400 border-indigo-500").removeClass("text-slate-400 border-transparent");
+  
+  loadTabData(tabId);
+}
 
-export async function fetchRecords(isNext = false, mapName = "", hunterName = "") {
-  try {
-    if (!isNext) {
-      currentOffset = 0;
-    } else {
-      currentOffset += 15;
-    }
+async function loadTabData(tabId) {
+  if (tabId === "users") renderUsers();
+  if (tabId === "records") {
+    currentOffset = 0;
+    renderRecords();
+  }
+  if (tabId === "configs") renderConfigs();
+}
 
-    const url = new URL('/api/match', window.location.origin);
-    url.searchParams.set("limit", 15);
-    url.searchParams.set("offset", currentOffset);
-    if (mapName) url.searchParams.set("map", mapName);
-    if (hunterName) url.searchParams.set("hunter", hunterName);
+async function renderUsers() {
+  const $tbody = $("#users-list");
+  $tbody.html('<tr><td colspan="4" class="p-8 text-center text-slate-500">載入中...</td></tr>');
+  const users = await fetchUsers();
+  $tbody.empty();
+  
+  users.forEach(u => {
+    const row = `
+      <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors">
+        <td class="p-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold">${(u.displayName || u.email || "?")[0].toUpperCase()}</div>
+            <span class="font-medium text-slate-200">${u.displayName || "未設定名稱"}</span>
+          </div>
+        </td>
+        <td class="p-4 text-slate-400 text-sm font-mono">${u.email || u.id}</td>
+        <td class="p-4">
+          <span class="px-2 py-0.5 rounded text-xs font-bold ${u.role === 'ADMIN' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'}">${u.role || "USER"}</span>
+        </td>
+        <td class="p-4">
+          <button class="change-role-btn text-xs text-indigo-400 hover:underline" data-id="${u.id}" data-role="${u.role || 'USER'}">切換權限</button>
+        </td>
+      </tr>
+    `;
+    $tbody.append(row);
+  });
+}
 
-    console.log(`[API] 正在從 D1 讀取戰績... (Offset: ${currentOffset})`);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error("Fetch Records API Failed");
+async function renderRecords(isNext = false) {
+  if (isFetching) return;
+  isFetching = true;
+  
+  const $tbody = $("#records-list");
+  if (!isNext) {
+    currentOffset = 0;
+    $tbody.html('<tr><td colspan="6" class="p-8 text-center text-slate-500">載入中...</td></tr>');
+  }
+
+  const mapFilter = $("#filter-map").val();
+  const data = await fetchRecordsAPI(currentOffset, mapFilter);
+  
+  if (!isNext) $tbody.empty();
+  
+  data.records.forEach(r => {
+    let bans = [];
+    try { bans = Array.isArray(r.ban_survivors) ? r.ban_survivors : JSON.parse(r.ban_survivors || "[]"); } catch(e) {}
     
-    const data = await res.json();
-    return { 
-      records: data.records || [], 
-      hasMore: data.hasMore || false 
-    };
-  } catch (e) {
-    console.error("fetchRecords error:", e);
-    return { records: [], hasMore: false };
-  }
+    const row = `
+      <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors text-sm">
+        <td class="p-3 text-slate-400 font-mono">${r.reported_at ? r.reported_at.split('T')[0] : '---'}</td>
+        <td class="p-3 text-slate-200">${r.map_name}</td>
+        <td class="p-3 text-emerald-400">${bans.join(", ")}</td>
+        <td class="p-3 text-amber-400">${r.hunter_name}</td>
+        <td class="p-3"><span class="text-xs bg-slate-700 px-1.5 py-0.5 rounded">${r.version}</span></td>
+        <td class="p-3">
+          <button class="delete-record-btn text-red-500 hover:text-red-400" data-id="${r.id}"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>
+    `;
+    $tbody.append(row);
+  });
+
+  $("#btn-next-records").toggleClass("hidden", !data.hasMore);
+  isFetching = false;
 }
 
-/** 刪除戰績 (遷移至 Cloudflare API) */
-export async function deleteRecord(id) {
-  try {
-    const res = await fetch(`/api/match?id=${id}`, {
-      method: 'DELETE'
-    });
-    if (!res.ok) throw new Error("Delete Request Failed");
-    return true;
-  } catch (e) {
-    console.error("deleteRecord error:", e);
-    return false;
-  }
+async function renderConfigs() {
+  const version = await fetchCurrentVersion();
+  $("#input-current-version").val(version);
 }
+
+// --- 事件監聽 ---
+
+function setupEventListeners() {
+  // 側邊欄
+  $(".menu-item").on("click", function() {
+    showSection($(this).data("tab"));
+  });
+
+  // 戰績分頁與過濾
+  $("#btn-next-records").on("click", function() {
+    currentOffset += 15;
+    renderRecords(true);
+  });
+
+  $("#filter-map").on("change", function() {
+    currentOffset = 0;
+    renderRecords();
+  });
+
+  // 刪除戰績
+  $(document).on("click", ".delete-record-btn", async function() {
+    const id = $(this).data("id");
+    if (confirm("確定要刪除這筆戰績嗎？")) {
+      if (await deleteRecordAPI(id)) {
+        $(this).closest("tr").fadeOut();
+      }
+    }
+  });
+
+  // 更新版本
+  $("#btn-save-version").on("click", async function() {
+    const v = $("#input-current-version").val();
+    if (await updateVersionAPI(v)) {
+      alert("版本更新成功");
+    }
+  });
+
+  // 切換權限 (Firestore)
+  $(document).on("click", ".change-role-btn", async function() {
+    const id = $(this).data("id");
+    const currentRole = $(this).data("role");
+    const newRole = currentRole === "ADMIN" ? "USER" : "ADMIN";
+    if (confirm(`確定要將該用戶權限改為 ${newRole} 嗎？`)) {
+      if (await updateUserRole(id, newRole)) {
+        renderUsers();
+      }
+    }
+  });
+  
+  // 登出
+  $("#btn-sign-out").on("click", () => auth.signOut());
+}
+
+// --- 初始化 ---
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    // 檢查管理員權限
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    const userData = userDoc.data();
+    
+    if (userData && userData.role === "ADMIN") {
+      $("#admin-name-display").text(user.displayName || user.email.split('@')[0]);
+      $("#loading-overlay").fadeOut();
+      setupEventListeners();
+      showSection("users"); // 預設顯示使用者管理
+    } else {
+      window.location.href = "index.html"; // 非管理員踢回首頁
+    }
+  } else {
+    window.location.href = "index.html"; // 未登入踢回首頁
+  }
+});
