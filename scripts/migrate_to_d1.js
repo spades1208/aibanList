@@ -21,8 +21,8 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 2. 設定 Cloudflare API 目標 (請修改為您的 Pages 網址)
-const TARGET_API_BASE = 'http://localhost:5000'; // 建議部署後改為 https://xxx.pages.dev
+// 2. 設定 Cloudflare API 目標 (已更新為正式網址)
+const TARGET_API_BASE = 'https://aibanlist.pages.dev';
 
 async function migrate() {
   console.log("🚀 開始從 Firestore 讀取資料...");

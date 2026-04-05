@@ -35,15 +35,22 @@ async def verify_token(request: Request, body: TokenRequest):
         request=request
     )
 
+    # 權限提取與保護
     rows = await d1_service.query("SELECT role FROM users WHERE id = ?", [uid], request=request)
-    role = rows[0]["role"] if rows else "user"
+    role = (rows[0]["role"] or "user") if rows else "user"
+    
+    # 硬性保護：主管理員信箱強制升級為 admin
+    if email.lower() == "waviskimo@gmail.com" and role.lower() != "admin":
+        role = "admin"
+        await d1_service.execute("UPDATE users SET role = 'admin' WHERE id = ?", [uid], request=request)
+        print(f"🛡️ Security: Promoted {email} to admin.")
 
     return UserInfo(
         uid=uid,
         email=email,
         display_name=display_name,
         photo_url=photo_url,
-        role=role,
+        role=role.lower(), # 確保回傳小寫
     )
 
 @router.get("/me")

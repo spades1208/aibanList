@@ -1,12 +1,14 @@
+import json
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from config import settings
 from routers import auth, admin
-from services import d1_service, firebase_service
+from services import d1_service
+from services.firebase_service import verify_id_token
 from pydantic import BaseModel
-from typing import List
-from firebase_admin import firestore
+from typing import List, Optional
+import time
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,7 +26,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://127.0.0.1:5500"],
+    allow_origins=[
+        settings.frontend_url, 
+        "http://127.0.0.1:5500", 
+        "http://localhost:5500",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,12 +62,16 @@ MAP_BASE_SCORES = {
 }
 
 @app.post("/predict")
-async def predict_hunter(body: PredictRequest):
+async def predict_hunter(body: PredictRequest, request: Request):
     """
     加權推演系統：地圖基礎分 + 分層 Ban 位匹配 + 徽章權重
     """
-    db = firebase_service.get_firestore()
-    docs = db.collection("match_records").where("map_name", "==", body.map_name).stream()
+    # 從 D1 抓取此地圖的歷史記錄
+    records = await d1_service.query(
+        "SELECT * FROM match_records WHERE map_name = ?", 
+        [body.map_name], 
+        request=request
+    )
     
     # 1. 載入地圖基礎分 (底層邏輯)
     counts = {}
@@ -77,14 +89,16 @@ async def predict_hunter(body: PredictRequest):
     max_matches_found = 0
 
     # 3. 疊加實戰數據分
-    for doc in docs:
-        data = doc.to_dict()
-        record_bans = set(data.get("ban_survivors", []))
-        
+    for data in records:
+        # D1 中的 ban_survivors 是 JSON 字串，需解析
+        try:
+            record_bans = set(json.loads(data.get("ban_survivors", "[]")))
+        except Exception:
+            record_bans = set()
+            
         intersection = input_bans.intersection(record_bans)
         match_count = len(intersection)
         
-        # 廣泛匹配邏輯
         if match_count > 0 or not input_bans:
             weight_tier = MATCH_WEIGHTS.get(match_count, 1.0) if input_bans else 1.0
             
@@ -100,8 +114,12 @@ async def predict_hunter(body: PredictRequest):
             counts[hunter] = counts.get(hunter, 0.0) + data_contribution
             total_score += data_contribution
     
-    if total_score == 0:
-        return {"predictions": [], "message": "目前尚無任何符合或相關聯的數據。"}
+    if total_score <= 0:
+        return {
+            "predictions": [],
+            "total_score": 0.0,
+            "precision_label": "數據稀缺 (無權重)"
+        }
 
     # 4. 排序並計算加權百分比
     sorted_hunters = sorted(counts.items(), key=lambda x: x[1], reverse=True)
@@ -117,7 +135,7 @@ async def predict_hunter(body: PredictRequest):
     if not input_bans: precision_label = "地圖原生排名"
     
     return {
-        "predictions": results[:10], # 僅回傳前 10 名
+        "predictions": results[:10], 
         "total_score": round(total_score, 1),
         "precision_label": precision_label
     }
@@ -132,25 +150,28 @@ class MatchSubmitRequest(BaseModel):
 @app.post("/submit-match")
 async def submit_match(request: Request, body: MatchSubmitRequest):
     """
-    透過『預測回饋』提交戰績，自動帶入版本
+    透過『預測回饋』提交戰績，自動帶入版本與用戶資訊
     """
-    db = firebase_service.get_firestore()
-    client_ip = request.client.host
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
     
-    # 抓取當前版本
-    config = db.collection("configs").document("current_status").get()
-    current_version = config.to_dict().get("current_version", "unknown") if config.exists else "unknown"
+    try:
+        decoded = verify_id_token(auth_header[7:])
+        uid = decoded["uid"]
+        name = decoded.get("name", "Unknown User")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-    db.collection("match_records").add({
-        "map_name": body.map_name,
-        "ban_survivors": body.ban_survivors,
-        "hunter_name": body.hunter_name,
-        "version": current_version,
-        "badge_level": body.badge_level,
-        "reported_at": firestore.SERVER_TIMESTAMP,
-        "reported_by_ip": client_ip,
-        "source": "feedback"
-    })
+    # 抓取當前版本
+    rows = await d1_service.query("SELECT value FROM configs WHERE key = 'current_version'", request=request)
+    current_version = rows[0]["value"] if rows else "unknown"
+
+    await d1_service.execute(
+        "INSERT INTO match_records (map_name, ban_survivors, hunter_name, version, badge_level, source, added_by_uid, added_by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [body.map_name, json.dumps(body.ban_survivors), body.hunter_name, current_version, body.badge_level, "feedback", uid, name],
+        request=request
+    )
 
     return {"status": "success", "message": "感謝您的數據貢獻！"}
 
@@ -170,67 +191,74 @@ last_report_times = {}
 
 @app.post("/report")
 async def report_match(request: Request, body: ReportRequest):
-    """提交戰績回報，自動標註當前版本"""
+    """提交戰績回報，強制驗證 Token 並提取用戶資訊"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Login required to report matches")
+    
+    try:
+        decoded = verify_id_token(auth_header[7:])
+        uid = decoded["uid"]
+        name = decoded.get("name", "Unknown User")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid session")
+
     client_ip = request.client.host
     now = time.time()
-    if client_ip in last_report_times and (now - last_report_times[client_ip]) < 120:
+    if client_ip in last_report_times and (now - last_report_times[client_ip]) < 60:
         raise HTTPException(status_code=429, detail="回報過於頻繁，請稍後再試")
 
-    db = firebase_service.get_firestore()
-    
     # 自動抓取當前版本
-    config = db.collection("configs").document("current_status").get()
-    current_version = config.to_dict().get("current_version", "unknown") if config.exists else "unknown"
+    rows = await d1_service.query("SELECT value FROM configs WHERE key = 'current_version'", request=request)
+    current_version = rows[0]["value"] if rows else "unknown"
 
-    db.collection("match_records").add({
-        "map_name": body.map_name,
-        "ban_survivors": body.ban_survivors,
-        "hunter_name": body.hunter_name,
-        "version": current_version,
-        "badge_level": body.badge_level,
-        "reported_at": firestore.SERVER_TIMESTAMP,
-        "reported_by_ip": client_ip
-    })
+    await d1_service.execute(
+        "INSERT INTO match_records (map_name, ban_survivors, hunter_name, version, badge_level, source, added_by_uid, added_by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [body.map_name, json.dumps(body.ban_survivors), body.hunter_name, current_version, body.badge_level, "user_report", uid, name],
+        request=request
+    )
 
     last_report_times[client_ip] = now
-    return {"status": "success", "message": f"感謝與您的貢獻！已加入 {current_version} 數據池。"}
+    return {"status": "success", "message": f"感謝 {name} 的貢獻！資料已納入 {current_version} 數據池。"}
 
 @app.post("/admin/update_version")
-async def update_version(body: VersionUpdateRequest):
+async def update_version(body: VersionUpdateRequest, request: Request):
     """更新當前版本號碼 (Admin 專屬)"""
-    db = firebase_service.get_firestore()
-    db.collection("configs").document("current_status").update({
-        "current_version": body.new_version
-    })
+    await d1_service.execute(
+        "UPDATE configs SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'current_version'",
+        [body.new_version],
+        request=request
+    )
     return {"status": "success", "new_version": body.new_version}
 
 @app.get("/options")
-async def get_options(map_name: str = None):
+async def get_options(request: Request, map_name: str = None):
     """
     回傳選單，並根據當前選擇的『地圖』動態計算『🔥 熱門強勢』角色。
-    邏輯：本地圖數據優先 -> 全局數據遞補 -> 初始 CSV 排序
+    邏輯：本地圖數據優先 -> 全局數據遞補 -> 初始資料庫排序
     """
-    db = firebase_service.get_firestore()
+    # 1. 讀取基礎清單
+    map_rows = await d1_service.query("SELECT name FROM maps ORDER BY name ASC", request=request)
+    surv_rows = await d1_service.query("SELECT name FROM survivors ORDER BY name ASC", request=request)
+    hunt_rows = await d1_service.query("SELECT name FROM hunters ORDER BY name ASC", request=request)
     
-    # 讀取基礎清單
-    maps = sorted([doc.to_dict().get("name") for doc in db.collection("maps").stream() if doc.to_dict().get("name")])
-    survivors_dict = {s.to_dict().get("name"): {"name": s.to_dict().get("name"), "is_hot": False, "is_map_specific": False} 
-                      for s in db.collection("survivors").stream() if s.to_dict().get("name")}
-    hunters_dict = {h.to_dict().get("name"): {"name": h.to_dict().get("name"), "is_hot": False, "is_map_specific": False} 
-                    for h in db.collection("hunters").stream() if h.to_dict().get("name")}
+    maps = [r["name"] for r in map_rows]
+    survivors_dict = {r["name"]: {"name": r["name"], "is_hot": False, "is_map_specific": False} for r in surv_rows}
+    hunters_dict = {r["name"]: {"name": r["name"], "is_hot": False, "is_map_specific": False} for r in hunt_rows}
     
-    # 讀取全數據計數
-    records = list(db.collection("match_records").stream())
+    # 2. 讀取實戰數據進行熱門度統計
+    records = await d1_service.query("SELECT map_name, hunter_name, ban_survivors FROM match_records", request=request)
     
-    # 分類計數
     map_counts = {"surv": {}, "hunt": {}}
     global_counts = {"surv": {}, "hunt": {}}
     
-    for doc in records:
-        data = doc.to_dict()
-        m_name = data.get("map_name")
-        h_name = data.get("hunter_name")
-        bans = data.get("ban_survivors", [])
+    for row in records:
+        m_name = row.get("map_name")
+        h_name = row.get("hunter_name")
+        try:
+            bans = json.loads(row.get("ban_survivors", "[]"))
+        except:
+            bans = []
         
         # 全局累積
         if h_name: global_counts["hunt"][h_name] = global_counts["hunt"].get(h_name, 0) + 1

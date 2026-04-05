@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Header, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request, HTTPException
+from services import d1_service
 from services.firebase_service import verify_id_token
-from services import d1_service, firebase_service
-from models.schemas import BanEntry, BanResponse
+from models.schemas import BanEntry, BanResponse, MatchRecord
 from typing import List, Optional
+import json
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -18,7 +19,7 @@ async def require_admin(request: Request, authorization: str = Header(...)):
 
     uid = decoded["uid"]
     rows = await d1_service.query("SELECT role FROM users WHERE id = ?", [uid], request=request)
-    if not rows or rows[0]["role"] != "admin":
+    if not rows or rows[0]["role"].lower() != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return uid
 
@@ -75,48 +76,44 @@ async def list_records(
     admin_uid: str = Depends(require_admin)
 ):
     """分頁列出所有戰績，並支援地圖與監管者篩選"""
-    db = firebase_service.get_firestore()
-    query = db.collection("match_records")
-
-    # 1. 條件篩選 (Firestore 複合查詢需要建立索引，這裡我們先採順序過濾或簡單過濾)
+    # 1. 構建 SQL 查詢
+    where_clauses = []
+    params = []
+    
     if map_name:
-        query = query.where("map_name", "==", map_name)
+        where_clauses.append("map_name = ?")
+        params.append(map_name)
     if hunter_name:
-        query = query.where("hunter_name", "==", hunter_name)
-
-    # 2. 分頁處理 (注意：大型數據建議使用 start_after 游標)
+        where_clauses.append("hunter_name = ?")
+        params.append(hunter_name)
+        
+    where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+    
+    # 2. 取得總數
+    count_rows = await d1_service.query(f"SELECT COUNT(*) as total FROM match_records{where_sql}", params, request=request)
+    total_count = count_rows[0]["total"] if count_rows else 0
+    
+    # 3. 執行分頁查詢
     offset = (page - 1) * page_size
+    query_sql = f"SELECT * FROM match_records{where_sql} ORDER BY reported_at DESC LIMIT ? OFFSET ?"
+    records = await d1_service.query(query_sql, params + [page_size, offset], request=request)
     
-    # 取得總數
-    # 注意：Firestore 取得總數在大規模數據下需使用 aggregation query
-    # 這裡我們先採簡易方式
-    all_docs = query.get()
-    total_count = len(all_docs)
-
-    # 執行分頁查詢
-    # 注意：在 Firestore 中，如果使用 order_by 某個欄位，則該欄位不存在的文檔會被自動排除。
-    # 由於 CSV 匯入的資料沒有 reported_at，所以我們先移除排序以確保資料能顯示。
-    docs = query.limit(page_size).offset(offset).get()
-    
-    results = []
-    for doc in docs:
-        d = doc.to_dict()
-        d["id"] = doc.id
-        # 轉換 Timestamp 為字串
-        if "reported_at" in d and d["reported_at"]:
-            d["reported_at"] = d["reported_at"].isoformat()
-        results.append(d)
-
+    # 4. 解析 JSON 並格式化
+    for r in records:
+        try:
+            r["ban_survivors"] = json.loads(r.get("ban_survivors", "[]"))
+        except:
+            r["ban_survivors"] = []
+            
     return {
-        "records": results,
+        "records": records,
         "total_count": total_count,
         "page": page,
         "page_size": page_size
     }
 
 @router.delete("/records/{record_id}")
-async def delete_record(request: Request, record_id: str, admin_uid: str = Depends(require_admin)):
+async def delete_record(request: Request, record_id: int, admin_uid: str = Depends(require_admin)):
     """刪除特定戰績記錄"""
-    db = firebase_service.get_firestore()
-    db.collection("match_records").document(record_id).delete()
+    await d1_service.execute("DELETE FROM match_records WHERE id = ?", [record_id], request=request)
     return {"message": f"Record {record_id} deleted"}

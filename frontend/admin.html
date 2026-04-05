@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>aiBanlist — 後台管理中心</title>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -60,7 +61,7 @@
     <section id="panel-users" class="space-y-6">
       <div class="flex items-center justify-between">
         <h2 class="text-3xl font-black text-white">使用者管理</h2>
-        <button onclick="loadUsers()" class="p-2 text-slate-500 hover:text-white transition-colors"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>
+        <button class="p-2 text-slate-500 hover:text-white transition-colors"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>
       </div>
       <div class="glass rounded-3xl overflow-hidden border border-white/5">
         <table class="w-full text-sm text-left">
@@ -124,13 +125,13 @@
       <div class="glass rounded-3xl overflow-hidden border border-white/5">
         <table class="w-full text-sm text-left">
           <thead>
-            <tr class="bg-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-              <th class="px-6 py-4">地圖</th>
-              <th class="px-6 py-4">Bans</th>
-              <th class="px-6 py-4">監管者</th>
-              <th class="px-6 py-4">徽章</th>
-              <th class="px-6 py-4">版本</th>
-              <th class="px-6 py-4">操作</th>
+            <tr class="bg-white/5">
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">地圖</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Bans</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">監管者</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">貢獻者</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">時間</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">操作</th>
             </tr>
           </thead>
           <tbody id="records-tbody" class="divide-y divide-white/5"></tbody>
@@ -150,218 +151,8 @@
     </section>
   </main>
 
-  <script type="module">
-    import { auth, onAuthStateChanged, logout } from "./js/auth.js";
-    import { fetchUsers, setUserRole, fetchRecords, deleteRecord, updateVersion, fetchCurrentVersion, migrateHistoricalData } from "./js/admin.js";
-    import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-    import { db } from "./js/auth.js";
 
-    let state = { currentPage: 1 };
-
-    // --- 1. 面板切換與數據加載 ---
-    async function showPanel(name) {
-      document.querySelectorAll('section[id^="panel-"]').forEach(el => el.style.display = 'none');
-      document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
-      
-      const targetPanel = document.getElementById(`panel-${name}`);
-      const targetNav = document.getElementById(`nav-${name}`);
-      
-      if (targetPanel) targetPanel.style.display = 'block';
-      if (targetNav) targetNav.classList.add('active');
-
-      // 觸發載入
-      if (name === 'users') await loadUsers();
-      if (name === 'records') await loadRecords(false); // 初始載入：不使用游標
-      if (name === 'config') {
-        const currentV = await fetchCurrentVersion();
-        document.getElementById("input-version").value = currentV || "";
-      }
-    }
-
-    // 將 showPanel 暴露給偵錯（可選）
-    window.showPanel = showPanel;
-
-    // 綁定選單事件
-    ['users', 'config', 'banlist', 'records'].forEach(name => {
-      const btn = document.getElementById(`nav-${name}`);
-      if (btn) btn.addEventListener('click', () => showPanel(name));
-    });
-
-    // --- 2. 身份與權限加載 ---
-    onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        window.location.href = "./index.html";
-        return;
-      }
-
-      document.getElementById("user-name").textContent = user.displayName || "使用者";
-      document.getElementById("user-avatar").src = user.photoURL || "https://ui-avatars.com/api/?name=Admin&background=6366f1&color=fff";
-      
-      try {
-        const userRef = doc(db, "users", user.uid);
-        let snap = await getDoc(userRef);
-        
-        if (!snap.exists()) {
-          const newUser = {
-            id: user.uid, email: user.email, display_name: user.displayName,
-            photo_url: user.photoURL, role: "user", created_at: new Date().toISOString()
-          };
-          await setDoc(userRef, newUser);
-          snap = { data: () => newUser };
-        }
-
-        const data = snap.data();
-        const role = data.role || 'user';
-        const roleEl = document.getElementById("user-role");
-        roleEl.textContent = role.toUpperCase();
-        
-        if (role !== 'admin') {
-          roleEl.classList.replace('text-indigo-400', 'text-red-400');
-        }
-      } catch (err) {
-        console.error("Auth process error:", err);
-      }
-
-      // 預設切換至使用者面板
-      await showPanel('users');
-      await initFilters(); 
-    });
-
-    // --- 3. 使用者與數據管理功能 ---
-    async function loadUsers() {
-      const tbody = document.getElementById("users-tbody");
-      if (!tbody) return;
-      tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
-      
-      const users = await fetchUsers();
-      console.log("Admin UI: Received users list:", users);
-      
-      if (!users || users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">暫無數據</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = users.map(u => `
-        <tr class="transition-colors hover:bg-white/[0.02]">
-          <td class="px-6 py-5">
-            <p class="text-white font-bold">${u.display_name || '未命名'}</p>
-            <p class="text-[10px] text-slate-500 font-mono">${u.id}</p>
-          </td>
-          <td class="px-6 py-5 text-slate-400">${u.email}</td>
-          <td class="px-6 py-5">
-            <span class="px-3 py-1 bg-indigo-500/10 text-indigo-400 rounded-lg font-black text-[10px] uppercase">${u.role || 'user'}</span>
-          </td>
-          <td class="px-6 py-5">
-            <select onchange="window.changeRole('${u.id}', this.value)" class="bg-slate-900 border border-slate-800 rounded-lg text-xs p-1 focus:outline-none">
-              <option value="user" ${u.role==='user'?'selected':''}>User</option>
-              <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
-            </select>
-          </td>
-        </tr>
-      `).join("");
-    }
-
-    async function changeRole(uid, role) {
-      if (await setUserRole(uid, role)) {
-        await loadUsers();
-      }
-    }
-
-    async function loadRecords(isNext = false) {
-      const tbody = document.getElementById("records-tbody");
-      if (!tbody) return;
-      tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
-
-      const mapVal = document.getElementById("filter-map")?.value || "";
-      const hunterVal = document.getElementById("filter-hunter")?.value || "";
-
-      // 呼叫優化後的分頁函式 (limit 15 + startAfter)
-      const res = await fetchRecords(isNext, mapVal, hunterVal);
-      const records = res.records || [];
-
-      if (records.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">暫無戰績數據</td></tr>';
-      } else {
-        tbody.innerHTML = records.map(r => `
-          <tr class="transition-colors hover:bg-white/[0.02]">
-            <td class="px-6 py-5 text-white font-medium">${r.map_name || '未知'}</td>
-            <td class="px-6 py-5 text-slate-400 text-xs">${(r.ban_survivors || []).join(', ') || '無'}</td>
-            <td class="px-6 py-5 text-indigo-300 font-bold">${r.hunter_name || '未記錄'}</td>
-            <td class="px-6 py-5"><span class="px-2 py-1 bg-slate-800 rounded text-[10px] font-black">${r.badge_level || '-'}</span></td>
-            <td class="px-6 py-5 text-slate-500 text-[10px] uppercase tracking-tighter">${r.version || '-'}</td>
-            <td class="px-6 py-5">
-              <button onclick="window.confirmDelete('${r.id}')" class="text-red-500 hover:text-red-400 p-2 text-xs font-bold">刪除</button>
-            </td>
-          </tr>
-        `).join("");
-      }
-
-      // 隱藏 Previous 按鈕，簡化為只要 Next (符合 Firestore startAfter 特性)
-      document.getElementById("btn-prev-page").style.display = 'none'; 
-      document.getElementById("page-info").textContent = isNext ? "Next Results" : "Latest Results";
-      document.getElementById("btn-next-page").disabled = !res.hasMore;
-    }
-
-    async function confirmDelete(id) {
-      if (confirm("確定刪除這筆戰績？")) {
-        if (await deleteRecord(id)) {
-          await loadRecords(state.currentPage);
-        }
-      }
-    }
-
-    // 暴露至全域供 HTML 調用
-    window.loadUsers = loadUsers;
-    window.changeRole = changeRole;
-    window.loadRecords = loadRecords;
-    window.confirmDelete = confirmDelete;
-
-    // --- 4. 配置與初始化 ---
-    async function initFilters() {
-      const defaults = { maps: ["軍工廠", "紅教堂", "唐人街", "聖心醫院", "湖景村", "永眠鎮", "月亮河公園", "里奧的回憶"], hunters: ["歌劇演員", "時空之影", "隱士", "夢之女巫"] };
-      const mS = document.getElementById("filter-map");
-      const hS = document.getElementById("filter-hunter");
-      if (mS) mS.innerHTML = '<option value="">所有地圖</option>' + defaults.maps.sort().map(m => `<option value="${m}">${m}</option>`).join('');
-      if (hS) hS.innerHTML = '<option value="">所有監管者</option>' + defaults.hunters.sort().map(h => `<option value="${h}">${h}</option>`).join('');
-    }
-
-    // 事件監聽
-    document.getElementById("btn-prev-page")?.addEventListener("click", () => loadRecords(false));
-    document.getElementById("btn-next-page")?.addEventListener("click", () => loadRecords(true));
-    document.getElementById("filter-map")?.addEventListener("change", () => loadRecords(false));
-    document.getElementById("filter-hunter")?.addEventListener("change", () => loadRecords(false));
-    document.getElementById("btn-logout")?.addEventListener("click", () => logout());
-    
-    document.getElementById("btn-save-version")?.addEventListener("click", async () => {
-      const v = document.getElementById("input-version").value;
-      if (await updateVersion(v)) {
-        alert("版本已成功更新為：" + v);
-      } else {
-        alert("更新失敗，請檢查權限。");
-      }
-    });
-
-    document.getElementById("btn-fix-data")?.addEventListener("click", async () => {
-      if (!confirm("確定要將所有 2024.12.30 和 unknown 版本號統一修復為 Season 41 嗎？")) return;
-      const btn = document.getElementById("btn-fix-data");
-      btn.disabled = true;
-      btn.textContent = "修復中...";
-      
-      try {
-        const count = await migrateHistoricalData();
-        alert(`成功更新了 ${count} 筆戰績版本號！`);
-        btn.textContent = "修復完成";
-      } catch (e) {
-        alert("修復過程中發生錯誤，請查看 Console。");
-        btn.textContent = "修復失敗";
-      } finally {
-        setTimeout(() => {
-          btn.disabled = false;
-          btn.textContent = "修復歷史版本數據 (將 2024.12.30 轉為 Season 41)";
-        }, 3000);
-      }
-    });
-  </script>
+  <script type="module" src="js/admin.js"></script>
 </body>
 </html>
 

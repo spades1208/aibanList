@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, auth, firestore
+from firebase_admin import credentials, auth
 from config import settings
 
 _app = None
@@ -16,8 +16,3 @@ def verify_id_token(id_token: str) -> dict:
     get_firebase_app()
     decoded = auth.verify_id_token(id_token)
     return decoded
-
-def get_firestore():
-    """取得 Firestore 客戶端"""
-    get_firebase_app()
-    return firestore.client()

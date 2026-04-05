@@ -1,5 +1,25 @@
-import { auth, db, signInWithGoogle, onAuthStateChanged } from "./auth.js";
-import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp, limit, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { auth, signInWithGoogle, onAuthStateChanged, getIdToken } from "./auth.js";
+
+// --- API Helper ---
+const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : ""; 
+
+async function apiFetch(path, options = {}) {
+  const token = await getIdToken();
+  const headers = {
+    "Content-Type": "application/json",
+    ...options.headers
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({ detail: "Request failed" }));
+    throw new Error(errorBody.detail || "API Request Failed");
+  }
+  return res.json();
+}
 
 // --- 核心演算數據 (原本在 main.py 的 calculate_prediction) ---
 const MAP_BASE_SCORES = {
@@ -46,68 +66,35 @@ function setCachedData(key, data) {
   localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
 }
 
-/** 執行加權推演預測 (原本的 API /predict 邏輯) */
+/** 執行加權推演預測 (呼叫後端 API) */
 export async function executePredictionLogic(mapName, banSurvivors) {
   if (!mapName) return null;
   try {
-    const q = query(collection(db, "match_records"), where("map_name", "==", mapName));
-    const querySnapshot = await getDocs(q);
-    let counts = {};
-    const baseData = MAP_BASE_SCORES[mapName] || {};
-    for (const [hunter, score] of Object.entries(baseData)) { counts[hunter] = parseFloat(score); }
-    let totalScore = Object.values(counts).reduce((sum, s) => sum + s, 0);
-    const inputBans = new Set(banSurvivors.filter(b => b));
-    let maxMatchesFound = 0;
-
-    querySnapshot.forEach((doc) => {
-      const data = doc.data();
-      const recordBans = new Set(Array.isArray(data.ban_survivors) ? data.ban_survivors : JSON.parse(data.ban_survivors || "[]"));
-      let matchCount = 0;
-      for (const ban of inputBans) { if (recordBans.has(ban)) matchCount++; }
-      if (matchCount > 0 || inputBans.size === 0) {
-        const weightTier = inputBans.size > 0 ? (MATCH_WEIGHTS[matchCount] || 1.0) : 1.0;
-        if (matchCount > maxMatchesFound) maxMatchesFound = matchCount;
-        const hunter = data.hunter_name || "未知監管者";
-        const badge = data.badge_level || "unknown";
-        const dataContribution = weightTier * (BADGE_WEIGHTS[badge] || 1.0);
-        counts[hunter] = (counts[hunter] || 0.0) + dataContribution;
-        totalScore += dataContribution;
-      }
+    return await apiFetch('/predict', {
+      method: "POST",
+      body: JSON.stringify({
+          map_name: mapName,
+          ban_survivors: banSurvivors.filter(b => b)
+      })
     });
-
-    const results = Object.entries(counts).filter(([_, s]) => s > 0).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([hName, score]) => {
-      const perc = totalScore > 0 ? (score / totalScore) * 100 : 0;
-      return { hunter_name: hName, score: parseFloat(score.toFixed(1)), percentage: `${perc.toFixed(1)}%` };
-    });
-
-    let precisionLabel = "數據精準 (Tier 1)";
-    if (maxMatchesFound === 2) precisionLabel = "廣泛參考 (Tier 2)";
-    if (maxMatchesFound === 1) precisionLabel = "趨勢預估 (Tier 3)";
-    if (inputBans.size === 0) precisionLabel = "地圖原生排名";
-
-    return { predictions: results, total_score: parseFloat(totalScore.toFixed(1)), precision_label: precisionLabel };
-  } catch (err) { console.error("Prediction Logic Error:", err); return { predictions: [], precision_label: "連線異常" }; }
+  } catch (err) { 
+    console.error("Prediction API Error:", err); 
+    return { predictions: [], precision_label: "連線異常" }; 
+  }
 }
 
 /** 提交戰績回饋 (遷移至 Cloudflare API) */
 export async function submitMatchFeedback(mapName, banSurvivors, hunterName, badgeLevel) {
   try {
-    const finalVersion = window.siteVersion || "Season 41";
-    
-    const response = await fetch('/api/match', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    await apiFetch('/submit-match', {
+      method: "POST",
       body: JSON.stringify({
         map_name: mapName,
-        ban_survivors: banSurvivors,
+        ban_survivors: banSurvivors.filter(b => b),
         hunter_name: hunterName,
-        version: finalVersion,
-        badge_level: badgeLevel || "C",
-        source: "feedback_frontend"
+        badge_level: badgeLevel || "C"
       })
     });
-
-    if (!response.ok) throw new Error("HTTP " + response.status);
     return true;
   } catch (err) { console.error("Submit Feedback Error:", err); throw err; }
 }
@@ -116,14 +103,14 @@ export async function submitMatchFeedback(mapName, banSurvivors, hunterName, bad
 export async function fetchOptionsData(activeMapName = "") {
   try {
     console.log(`[API] 正在從 Cloudflare 抓取數據... (Map: ${activeMapName || 'Global'})`);
-    const response = await fetch(`/api/options?map=${encodeURIComponent(activeMapName)}`);
-    if (!response.ok) throw new Error("API Fetch Failed");
+    let url = "/options";
+    if (activeMapName) url += `?map_name=${encodeURIComponent(activeMapName)}`;
     
-    const data = await response.json();
+    const data = await apiFetch(url);
 
     // 更新版本號至全域
-    if (data.version) {
-      window.siteVersion = data.version;
+    if (data.current_version) {
+      window.siteVersion = data.current_version;
       $("#app-version-display").text(window.siteVersion);
     }
 
@@ -293,22 +280,7 @@ function bindFeedbackEvents(topHunter, map, bans) {
 
 async function loadInitialData(mapName = null) {
   try {
-    // 1. 初始化系統配置 (僅首次載入)
-    if (!mapName) {
-      try {
-        const configSnap = await getDoc(doc(db, "configs", "current_status"));
-        if (configSnap.exists()) {
-          const v = configSnap.data().current_version;
-          window.siteVersion = v || "Season 41";
-          $("#app-version-display").text(window.siteVersion);
-        } else {
-          $("#app-version-display").text(window.siteVersion); // 使用 Season 41 預設值
-        }
-      } catch (e) { 
-        console.warn("Version fetch failed, using Season 41:", e);
-        $("#app-version-display").text(window.siteVersion);
-      }
-    }
+    // 1. 不需要在此處讀取配置，fetchOptionsData 會自動同步
 
     const d = await fetchOptionsData(mapName);
     
@@ -393,28 +365,17 @@ $(() => {
       $("#profile-name").text(u.displayName || "使用者");
       $("#profile-avatar").attr("src", u.photoURL || "https://ui-avatars.com/api/?name=User&background=6366f1&color=fff");
       
-      // 即時連線確認角色 (解決 Admin 消失問題)
+      // 即時連線確認角色 (改向後端驗證，並同步 D1 使用者資料)
       try {
-        const userRef = doc(db, "users", u.uid);
-        let userSnap = await getDoc(userRef);
+        const idToken = await u.getIdToken(true);
+        const userData = await apiFetch('/auth/verify', {
+            method: "POST",
+            body: JSON.stringify({ id_token: idToken })
+        });
         
-        // 緊急修復：如果使用者文件不存在，自動建立一個預設文件
-        if (!userSnap.exists()) {
-          console.warn("User profile missing locally, auto-provisioning...");
-          const newUser = {
-            id: u.uid,
-            email: u.email,
-            display_name: u.displayName,
-            photo_url: u.photoURL,
-            role: "user", 
-            created_at: new Date().toISOString()
-          };
-          await setDoc(userRef, newUser);
-          userSnap = { data: () => newUser }; // 模擬 snap
-        }
-
-        const role = userSnap.data().role || "user";
-        localStorage.setItem("userRole", role);
+        const role = (userData.role || "user").toLowerCase();
+        
+        console.log(`[Auth] User Role: ${role}`);
 
         if (role === "admin") {
           $("#admin-tag-container").html(`
