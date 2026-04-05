@@ -1,5 +1,5 @@
 import { auth, db, signInWithGoogle, onAuthStateChanged } from "./auth.js";
-import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { doc, getDoc, setDoc, collection, query, where, getDocs, addDoc, serverTimestamp, limit, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 // --- 核心演算數據 (原本在 main.py 的 calculate_prediction) ---
 const MAP_BASE_SCORES = {
@@ -19,6 +19,32 @@ window.siteVersion = "Season 41"; // 全域版本號預設為 Season 41
 const FALLBACK_MAPS = ["軍工廠", "紅教堂", "聖心醫院", "湖景村", "永眠鎮", "月亮河公園", "唐人街", "里奧的回憶"];
 const FALLBACK_SURVIVORS = ["古董商", "空軍", "傭兵", "先知", "咒術師", "雜技演員", "小女孩", "昆蟲學者", "心理學家", "病患", "調酒師", "入殮師", "勘探員", "大副", "野人", "守墓人", "舞女", "機械師", "牛仔", "盲女", "祭司", "前鋒", "醫生", "律師", "慈善家", "園丁", "冒險家", "魔術師", "教授"];
 const FALLBACK_HUNTERS = ["歌劇演員", "時空之影", "隱士", "夢之女巫", "雕刻家", "紅蝶", "漁女", "守夜人", "宿傘之魂", "『公投』", "『使徒』", "蜘蛛", "『傑克』", "黃衣之主", "紅夫人", "愛哭鬼", "瘋眼", "攝影師", "蠟像師", "噩夢", "小提琴家", "破輪", "博士", "記錄員", "廠長", "鹿頭", "小丑"];
+
+// --- 快取控制常數 ---
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 小時
+const CACHE_KEYS = {
+  MAPS: "cache_maps",
+  SURVIVORS: "cache_survivors",
+  HUNTERS: "cache_hunters"
+};
+
+/** 讀取本地快取 */
+function getCachedData(key) {
+  const cached = localStorage.getItem(key);
+  if (!cached) return null;
+  const { data, timestamp } = JSON.parse(cached);
+  if (Date.now() - timestamp > CACHE_TTL) {
+    localStorage.removeItem(key);
+    return null;
+  }
+  console.log(`[Cache] 已從快取加載數據: ${key}`);
+  return data;
+}
+
+/** 存入本地快取 */
+function setCachedData(key, data) {
+  localStorage.setItem(key, JSON.stringify({ data, timestamp: Date.now() }));
+}
 
 /** 執行加權推演預測 (原本的 API /predict 邏輯) */
 export async function executePredictionLogic(mapName, banSurvivors) {
@@ -78,25 +104,9 @@ export async function submitMatchFeedback(mapName, banSurvivors, hunterName, bad
   } catch (err) { console.error("Submit Feedback Error:", err); throw err; }
 }
 
-/** 抓取全量資料 (原本的 API /options 邏輯) */
+/** 抓取全量資料 (優化版：支援快取與限制熱門計算範圍) */
 export async function fetchOptionsData(activeMapName = "") {
   try {
-    const [mapsSnap, survsSnap, huntsSnap, recordsSnap] = await Promise.all([
-      getDocs(collection(db, "maps")), getDocs(collection(db, "survivors")),
-      getDocs(collection(db, "hunters")), getDocs(collection(db, "match_records"))
-    ]).catch(() => [null, null, null, null]);
-
-    let maps = mapsSnap ? mapsSnap.docs.map(d => d.data().name).filter(n => n) : [];
-    if (maps.length === 0) maps = FALLBACK_MAPS;
-    
-    let survivorsDict = {};
-    if (!survsSnap || survsSnap.empty) {
-      FALLBACK_SURVIVORS.forEach(name => survivorsDict[name] = { name, is_hot: false });
-    } else {
-      survsSnap.docs.forEach(d => { const n = d.data().name; survivorsDict[n] = { name: n, is_hot: false }; });
-    }
-
-    let huntersDict = {}; 
     if (!huntsSnap || huntsSnap.empty) {
       FALLBACK_HUNTERS.forEach(name => huntersDict[name] = { name, is_hot: false });
     } else {

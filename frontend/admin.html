@@ -171,7 +171,7 @@
 
       // 觸發載入
       if (name === 'users') await loadUsers();
-      if (name === 'records') await loadRecords(1);
+      if (name === 'records') await loadRecords(false); // 初始載入：不使用游標
       if (name === 'config') {
         const currentV = await fetchCurrentVersion();
         document.getElementById("input-version").value = currentV || "";
@@ -267,8 +267,7 @@
       }
     }
 
-    async function loadRecords(page = 1) {
-      state.currentPage = page;
+    async function loadRecords(isNext = false) {
       const tbody = document.getElementById("records-tbody");
       if (!tbody) return;
       tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">加載中...</td></tr>';
@@ -276,7 +275,8 @@
       const mapVal = document.getElementById("filter-map")?.value || "";
       const hunterVal = document.getElementById("filter-hunter")?.value || "";
 
-      const res = await fetchRecords(page, mapVal, hunterVal);
+      // 呼叫優化後的分頁函式 (limit 15 + startAfter)
+      const res = await fetchRecords(isNext, mapVal, hunterVal);
       const records = res.records || [];
 
       if (records.length === 0) {
@@ -296,9 +296,10 @@
         `).join("");
       }
 
-      document.getElementById("page-info").textContent = `Page ${page}`;
-      document.getElementById("btn-prev-page").disabled = page === 1;
-      document.getElementById("btn-next-page").disabled = records.length < 10;
+      // 隱藏 Previous 按鈕，簡化為只要 Next (符合 Firestore startAfter 特性)
+      document.getElementById("btn-prev-page").style.display = 'none'; 
+      document.getElementById("page-info").textContent = isNext ? "Next Results" : "Latest Results";
+      document.getElementById("btn-next-page").disabled = !res.hasMore;
     }
 
     async function confirmDelete(id) {
@@ -325,10 +326,10 @@
     }
 
     // 事件監聽
-    document.getElementById("btn-prev-page")?.addEventListener("click", () => loadRecords(state.currentPage - 1));
-    document.getElementById("btn-next-page")?.addEventListener("click", () => loadRecords(state.currentPage + 1));
-    document.getElementById("filter-map")?.addEventListener("change", () => loadRecords(1));
-    document.getElementById("filter-hunter")?.addEventListener("change", () => loadRecords(1));
+    document.getElementById("btn-prev-page")?.addEventListener("click", () => loadRecords(false));
+    document.getElementById("btn-next-page")?.addEventListener("click", () => loadRecords(true));
+    document.getElementById("filter-map")?.addEventListener("change", () => loadRecords(false));
+    document.getElementById("filter-hunter")?.addEventListener("change", () => loadRecords(false));
     document.getElementById("btn-logout")?.addEventListener("click", () => logout());
     
     document.getElementById("btn-save-version")?.addEventListener("click", async () => {

@@ -1,5 +1,5 @@
 import { db } from "./auth.js";
-import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, orderBy, limit, startAfter, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 // ── 系統配置與版本官理 ──────────────────────────────────────
 
@@ -91,24 +91,48 @@ export async function fetchBanlist() {
   }
 }
 
-// ── 戰績數據管理 ──────────────────────────────────────────
+// ── 戰績數據管理 (優化版：伺服器端分頁) ──────────────────────────
 
-export async function fetchRecords(page = 1, mapName = "", hunterName = "") {
+let lastRecordDoc = null; // 用於追蹤分頁游標
+
+export async function fetchRecords(isNext = false, mapName = "", hunterName = "") {
   try {
-    const snap = await getDocs(collection(db, "match_records"));
-    let records = snap.docs.map(d => ({id: d.id, ...d.data()}));
+    const colRef = collection(db, "match_records");
+    let q;
+
+    // 建立基礎查詢 (按時間倒序)
+    const constraints = [orderBy("reported_at", "desc")];
     
-    // 簡易前端過濾
-    if (mapName) records = records.filter(r => r.map_name === mapName);
-    if (hunterName) records = records.filter(r => r.hunter_name === hunterName);
+    // 如果有過濾條件，Firestore 要求必須先對過濾欄位進行 orderBy (或建立複合索引)
+    // 為了簡單起見，我們先支援基礎 orderBy + limit
+    if (mapName) constraints.push(where("map_name", "==", mapName));
+    if (hunterName) constraints.push(where("hunter_name", "==", hunterName));
     
-    // 簡易前端分頁 (10 per page)
-    const start = (page - 1) * 10;
-    const paginated = records.slice(start, start + 10);
-    return { records: paginated, total: records.length };
+    constraints.push(limit(15));
+
+    // 如果是載入下一頁且有游標
+    if (isNext && lastRecordDoc) {
+      constraints.push(startAfter(lastRecordDoc));
+    } else {
+      // 否則視為重置查詢 (比如換地圖或換監管者)
+      lastRecordDoc = null;
+    }
+
+    q = query(colRef, ...constraints);
+    
+    console.log(`[Cloud] 正在從雲端讀取 15 筆分頁數據... (Next: ${isNext})`);
+    const snap = await getDocs(q);
+    
+    if (!snap.empty) {
+      lastRecordDoc = snap.docs[snap.docs.length - 1];
+    }
+
+    const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    
+    return { records, hasMore: records.length === 15 };
   } catch (e) {
     console.error("fetchRecords error:", e);
-    return { records: [], total: 0 };
+    return { records: [], hasMore: false };
   }
 }
 
