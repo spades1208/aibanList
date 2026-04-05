@@ -61,7 +61,7 @@ export async function executePredictionLogic(mapName, banSurvivors) {
 
     querySnapshot.forEach((doc) => {
       const data = doc.data();
-      const recordBans = new Set(data.ban_survivors || []);
+      const recordBans = new Set(Array.isArray(data.ban_survivors) ? data.ban_survivors : JSON.parse(data.ban_survivors || "[]"));
       let matchCount = 0;
       for (const ban of inputBans) { if (recordBans.has(ban)) matchCount++; }
       if (matchCount > 0 || inputBans.size === 0) {
@@ -89,52 +89,62 @@ export async function executePredictionLogic(mapName, banSurvivors) {
   } catch (err) { console.error("Prediction Logic Error:", err); return { predictions: [], precision_label: "連線異常" }; }
 }
 
-/** 提交戰績回饋 (原本的 API /submit-match 邏輯) */
+/** 提交戰績回饋 (遷移至 Cloudflare API) */
 export async function submitMatchFeedback(mapName, banSurvivors, hunterName, badgeLevel) {
   try {
-    // 強制使用全域變數，若不存在則依序保底
-    const finalVersion = window.siteVersion || $("#app-version-display").text() || "Season 41";
+    const finalVersion = window.siteVersion || "Season 41";
     
-    await addDoc(collection(db, "match_records"), {
-      map_name: mapName, ban_survivors: banSurvivors, hunter_name: hunterName,
-      version: finalVersion, badge_level: badgeLevel || "C",
-      reported_at: serverTimestamp(), source: "feedback_frontend"
+    const response = await fetch('/api/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        map_name: mapName,
+        ban_survivors: banSurvivors,
+        hunter_name: hunterName,
+        version: finalVersion,
+        badge_level: badgeLevel || "C",
+        source: "feedback_frontend"
+      })
     });
+
+    if (!response.ok) throw new Error("HTTP " + response.status);
     return true;
   } catch (err) { console.error("Submit Feedback Error:", err); throw err; }
 }
 
-/** 抓取全量資料 (優化版：支援快取與限制熱門計算範圍) */
+/** 抓取全量資料 (遷移至 Cloudflare API) */
 export async function fetchOptionsData(activeMapName = "") {
   try {
-    if (!huntsSnap || huntsSnap.empty) {
-      FALLBACK_HUNTERS.forEach(name => huntersDict[name] = { name, is_hot: false });
-    } else {
-      huntsSnap.docs.forEach(d => { const n = d.data().name; huntersDict[n] = { name: n, is_hot: false }; });
+    console.log(`[API] 正在從 Cloudflare 抓取數據... (Map: ${activeMapName || 'Global'})`);
+    const response = await fetch(`/api/options?map=${encodeURIComponent(activeMapName)}`);
+    if (!response.ok) throw new Error("API Fetch Failed");
+    
+    const data = await response.json();
+
+    // 更新版本號至全域
+    if (data.version) {
+      window.siteVersion = data.version;
+      $("#app-version-display").text(window.siteVersion);
     }
 
-    if (recordsSnap) {
-      let mC = {s:{}, h:{}}, gC = {s:{}, h:{}};
-      recordsSnap.docs.forEach(d => {
-        const da = d.data(), mN = da.map_name, hN = da.hunter_name, bans = da.ban_survivors || [];
-        if (hN) gC.h[hN] = (gC.h[hN]||0)+1;
-        bans.forEach(b => gC.s[b] = (gC.s[b]||0)+1);
-        if (activeMapName && mN === activeMapName) {
-           if (hN) mC.h[hN] = (mC.h[hN]||0)+1;
-           bans.forEach(b => mC.s[b] = (mC.s[b]||0)+1);
-        }
-      });
-      const markHot = (dict, m, g) => {
-        let hot = Object.entries(Object.values(m).reduce((a,b)=>a+b,0)>=3 ? m : g).sort((a,b)=>b[1]-a[1]).slice(0,5);
-        hot.forEach(([n]) => { if(dict[n]) dict[n].is_hot = true; });
-      };
-      markHot(survivorsDict, mC.s, gC.s);
-      markHot(huntersDict, mC.h, gC.h);
-    }
+    // 更新快取
+    if (data.maps) setCachedData(CACHE_KEYS.MAPS, data.maps);
+    if (data.survivors) setCachedData(CACHE_KEYS.SURVIVORS, data.survivors);
+    if (data.hunters) setCachedData(CACHE_KEYS.HUNTERS, data.hunters);
 
-    return { maps: [...new Set(maps)].sort(), survivors: Object.values(survivorsDict), hunters: Object.values(huntersDict) };
+    return { 
+      maps: data.maps || FALLBACK_MAPS, 
+      survivors: data.survivors || FALLBACK_SURVIVORS.map(n => ({ name: n, is_hot: false })), 
+      hunters: data.hunters || FALLBACK_HUNTERS.map(n => ({ name: n, is_hot: false })) 
+    };
   } catch (err) {
-    return { maps: FALLBACK_MAPS, survivors: FALLBACK_SURVIVORS.map(n=>({name:n,is_hot:false})), hunters: FALLBACK_HUNTERS.map(n=>({name:n,is_hot:false})) };
+    console.error("fetchOptionsData Error:", err);
+    // 發生錯誤時使用快取或保底數據
+    return { 
+      maps: getCachedData(CACHE_KEYS.MAPS) || FALLBACK_MAPS, 
+      survivors: getCachedData(CACHE_KEYS.SURVIVORS) || FALLBACK_SURVIVORS.map(n => ({ name: n, is_hot: false })), 
+      hunters: getCachedData(CACHE_KEYS.HUNTERS) || FALLBACK_HUNTERS.map(n => ({ name: n, is_hot: false })) 
+    };
   }
 }
 
