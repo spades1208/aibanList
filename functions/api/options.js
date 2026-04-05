@@ -1,6 +1,6 @@
 /**
  * GET /api/options?map=...
- * 抓取地圖、角色清單、熱門狀態及全站版本號
+ * 抓取地圖、角色清單、熱門狀態及全站版本號 (Trigger Deploy)
  */
 export async function onRequest(context) {
   const { env } = context;
