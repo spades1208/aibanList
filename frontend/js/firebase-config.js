@@ -1,5 +1,5 @@
-// ⚠️ 填入你在 Firebase Console 取得的 firebaseConfig
-// Firebase Console → 專案設定 → 你的應用程式 → firebaseConfig
+// ?? 憛怠雿 Firebase Console ????firebaseConfig
+// Firebase Console ??撠?閮剖? ??雿??蝔? ??firebaseConfig
 
 export const firebaseConfig = {
   apiKey: "AIzaSyBDAwNlRFIACf3p7kIt0xVxZhVDxuWxMp8",
