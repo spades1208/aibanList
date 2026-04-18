@@ -179,7 +179,10 @@ async function executePrediction() {
           <div class="glass p-6 rounded-[2rem] border border-white/5 flex items-center justify-between transition hover:border-indigo-500/30">
             <div class="flex items-center gap-4">
               <span class="text-indigo-500 font-black text-xl">${i+1}</span>
-              <span class="text-slate-100 font-bold text-lg">${p.hunter_name}</span>
+              <div class="flex flex-col">
+                <span class="text-slate-100 font-bold text-lg">${p.hunter_name}</span>
+                <span class="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-0.5">${p.count} 次紀錄</span>
+              </div>
             </div>
             <div class="text-indigo-400 font-black text-xl tracking-tighter">${p.percentage}</div>
           </div>

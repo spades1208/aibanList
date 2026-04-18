@@ -27,8 +27,12 @@ export async function onRequestPost(context) {
             WHERE r.map_name = ? AND (u.is_blacklisted IS NULL OR u.is_blacklisted = 0)
         `).bind(map_name).all();
         const counts = {};
+        const match_counts = {}; // 新增：追蹤真實出現次數
         const base_data = MAP_BASE_SCORES[map_name] || {};
-        for (const [h, score] of Object.entries(base_data)) counts[h] = score;
+        for (const [h, score] of Object.entries(base_data)) {
+            counts[h] = score;
+            match_counts[h] = 0; // 基礎分不計入真實比賽次數
+        }
 
         let total_score = Object.values(counts).reduce((a, b) => a + b, 0);
         const inputBans = new Set(ban_survivors || []);
@@ -49,13 +53,19 @@ export async function onRequestPost(context) {
                 const badgeWeight = BADGE_WEIGHTS[badge] || 1.0;
                 const contribution = weightTier * badgeWeight;
                 counts[hunter] = (counts[hunter] || 0) + contribution;
+                match_counts[hunter] = (match_counts[hunter] || 0) + 1; // 增加真實次數
                 total_score += contribution;
             }
         });
 
         if (total_score <= 0) return new Response(JSON.stringify({ predictions: [], total_score: 0, precision_label: "數據稀缺" }), { headers: { "Content-Type": "application/json" } });
         const sortedHunters = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-        const predictions = sortedHunters.map(([h, c]) => ({ hunter_name: h, score: Math.round(c * 10) / 10, percentage: ((c / total_score) * 100).toFixed(1) + "%" }));
+        const predictions = sortedHunters.map(([h, c]) => ({ 
+            hunter_name: h, 
+            score: Math.round(c * 10) / 10, 
+            count: match_counts[h] || 0, // 回傳次數
+            percentage: ((c / total_score) * 100).toFixed(1) + "%" 
+        }));
 
         return new Response(JSON.stringify({ predictions, total_score: Math.round(total_score * 10) / 10, precision_label: "數據精準" }), { headers: { "Content-Type": "application/json" } });
     } catch (e) { return new Response(JSON.stringify({ error: e.message }), { status: 500 }); }
