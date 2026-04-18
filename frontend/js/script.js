@@ -94,26 +94,79 @@ export async function fetchOptionsData(activeMapName = "") {
 }
 
 // --- UI Helpers ---
+let allSurvivors = [];
+let currentBans = []; // 儲存已選中的角色物件
+
 export function renderOptions(selector, items, placeholder) {
   const $el = $(selector);
   $el.empty().append(new Option(placeholder, ""));
-  const hots = items.filter(i => i.is_hot);
-  const others = items.filter(i => !i.is_hot);
-  if (hots.length > 0) {
-    const g = $('<optgroup label="🔥 熱門推薦"></optgroup>');
-    hots.forEach(i => { g.append(new Option(`🔥 ${i.name}`, i.name)); });
-    $el.append(g);
-  }
-  const gAll = $('<optgroup label="所有角色"></optgroup>');
-  others.forEach(i => gAll.append(new Option(i.name, i.name)));
-  $el.append(gAll);
+  items.forEach(i => {
+    const name = typeof i === "string" ? i : i.name;
+    $el.append(new Option(name, name));
+  });
   $el.select2({ placeholder, width: '100%', allowClear: true });
+}
+
+function updateBanDisplay() {
+  const $slots = $("#unified-ban-slots .ban-slot");
+  $slots.each(function(i) {
+    const char = currentBans[i];
+    const $slot = $(this);
+    if (char) {
+      $slot.removeClass("empty").html(`
+        <img src="${char.portrait}" onerror="this.src='https://placehold.co/100x120/1a1a1a/666?text=?'">
+        <div class="slot-name">${char.name}</div>
+      `);
+    } else {
+      $slot.addClass("empty").empty();
+    }
+  });
+  $("#ban-count-tag").text(`${currentBans.length} / 3`);
+  executePrediction();
+}
+
+function openPicker() {
+  $("#character-picker-modal").fadeIn(300).css("display", "block");
+  renderGrid();
+}
+
+function renderGrid(filter = "") {
+  const $grid = $("#character-grid").empty();
+  const filtered = allSurvivors.filter(s => s.name.includes(filter));
+  
+  filtered.forEach(s => {
+    const isSelected = currentBans.some(b => b.name === s.name);
+    const isDisabled = !isSelected && currentBans.length >= 3;
+    
+    const $card = $(`
+      <div class="character-card ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-name="${s.name}">
+        <img src="${s.portrait}" onerror="this.src='https://placehold.co/100x100/151515/333?text=${s.name.slice(0,1)}'">
+        <div class="char-name">${s.name}</div>
+      </div>
+    `);
+    
+    if (!isDisabled) {
+      $card.on("click", () => toggleCharacter(s));
+    }
+    $grid.append($card);
+  });
+}
+
+function toggleCharacter(char) {
+  const index = currentBans.findIndex(b => b.name === char.name);
+  if (index > -1) {
+    currentBans.splice(index, 1);
+  } else if (currentBans.length < 3) {
+    currentBans.push(char);
+  }
+  renderGrid($("#char-search").val());
+  updateBanDisplay();
 }
 
 async function executePrediction() {
   const map = $("#predict-map").val();
   if (!map) return;
-  const bans = $(".survivor-select").map((i, el) => $(el).val()).get().filter(v => v);
+  const bans = currentBans.map(b => b.name);
   $("#predict-results").removeClass("hidden").show();
   $("#results-placeholder").hide();
   try {
@@ -184,27 +237,13 @@ async function executePrediction() {
 
 async function loadInitialData(mapName = null) {
   const d = await fetchOptionsData(mapName);
-  if (!mapName && d.maps) renderOptions("#predict-map", d.maps.map(m => ({name: m})), "-- 請選擇地圖 --");
-  if (d.survivors) renderOptions(".survivor-select", d.survivors, "(無 Ban 位)");
+  if (!mapName && d.maps) renderOptions("#predict-map", d.maps, "-- 請選擇地圖 --");
+  if (d.survivors) {
+    allSurvivors = d.survivors;
+  }
 }
 
-// --- UI Mutex (Prevent duplicate picks) ---
-function updateExclusion() {
-  const $selects = $(".survivor-select");
-  const allSelected = $selects.map((i, el) => $(el).val()).get().filter(v => v);
-
-  $selects.each(function() {
-    const $this = $(this);
-    const myCurrentVal = $this.val();
-    $this.find("option").each(function() {
-      const optVal = $(this).val();
-      if (!optVal) return; 
-      const isUsedByOthers = allSelected.includes(optVal) && optVal !== myCurrentVal;
-      $(this).prop("disabled", isUsedByOthers);
-    });
-    $this.trigger('change.select2');
-  });
-}
+// --- UI Mutex (Legacy - Removed) ---
 
 // --- Init ---
 $(() => {
@@ -212,15 +251,17 @@ $(() => {
     const val = $(this).val();
     if(val) {
       $("#ban-container").removeClass("opacity-50 pointer-events-none");
-      $(".survivor-select").val(null).trigger("change.select2");
+      currentBans = [];
+      updateBanDisplay();
       loadInitialData(val);
-      executePrediction();
     }
   });
 
-  $(document).on("change", ".survivor-select", () => {
-    updateExclusion();
-    executePrediction();
+  // Ban Grid Events
+  $("#unified-ban-slots").on("click", ".ban-slot", openPicker);
+  $("#btn-close-picker").on("click", () => $("#character-picker-modal").fadeOut(300));
+  $("#char-search").on("input", function() {
+    renderGrid($(this).val());
   });
 
   $("#btn-google-login").on("click", async () => {

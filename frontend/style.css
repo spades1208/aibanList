@@ -61,7 +61,162 @@ html, body {
   letter-spacing: 0.1em; 
 }
 
-/* Select2 矩形化 */
+/* 求生者選角區塊 (統一顯示) */
+.unified-ban-slots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.ban-slot {
+  aspect-ratio: 1/1.2;
+  background: #1a1a1a;
+  border: 1px dashed #333;
+  border-radius: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  position: relative;
+}
+
+.ban-slot:hover {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.05);
+  transform: translateY(-2px);
+}
+
+.ban-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: filter 0.3s;
+}
+
+.ban-slot .slot-name {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(transparent, rgba(0,0,0,0.8));
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+  padding: 8px 2px;
+}
+
+.ban-slot.empty::before {
+  content: '+';
+  font-size: 24px;
+  color: #444;
+  font-weight: 200;
+}
+
+/* 選角面板 (Modal) */
+.character-picker-modal {
+  display: none;
+  fixed: 0; 
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(15px);
+  z-index: 1000;
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+.modal-content {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 15px;
+  margin-top: 2rem;
+}
+
+.character-card {
+  aspect-ratio: 1/1;
+  background: #151515;
+  border: 1px solid #222;
+  border-radius: 1.2rem;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.character-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.8;
+}
+
+.character-card:hover {
+  transform: scale(1.05);
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+
+.character-card:hover img { opacity: 1; }
+
+.character-card.selected {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 25px rgba(99, 102, 241, 0.5);
+}
+
+.character-card.selected::after {
+  content: '✓';
+  position: absolute;
+  top: 5px; right: 5px;
+  background: var(--accent);
+  color: white;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  display: flex; items-center; justify-content: center;
+  font-size: 12px; font-weight: bold;
+}
+
+.character-card.disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+.character-card .char-name {
+  position: absolute;
+  bottom: 0px;
+  width: 100%;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 11px;
+  text-align: center;
+  padding: 4px;
+  font-weight: 600;
+}
+
+/* 搜尋框 */
+.search-input {
+  width: 100%;
+  background: #222;
+  border: 1px solid #333;
+  padding: 1rem 1.5rem;
+  border-radius: 1rem;
+  color: white;
+  font-size: 1rem;
+  outline: none;
+}
+
+.search-input:focus { border-color: var(--accent); }
+
+/* 原有 Select2 樣式移除後保留通用 Select2 下拉 (如果還有其他 select) */
 .select2-container .select2-selection--single {
   background-color: #1e1e1e !important; 
   border: 1px solid #333 !important; 
@@ -69,68 +224,8 @@ html, body {
   height: 52px !important; 
   display: flex; 
   align-items: center; 
-  position: relative !important;
 }
-
 .select2-container--default .select2-selection--single .select2-selection__rendered {
-  color: #fff !important; 
-  padding-left: 15px !important; 
-  line-height: 52px !important;
+  color: #fff !important; line-height: 52px !important; padding-left: 15px !important;
 }
-
-/* 清除按鈕 X */
-.select2-selection__clear {
-  position: absolute !important; 
-  right: 35px !important; 
-  top: 50% !important; 
-  transform: translateY(-50%) !important;
-  font-size: 18px !important; 
-  color: #666 !important; 
-  z-index: 10;
-}
-
-/* 反饋嵌入樣式 */
-.feedback-inline { 
-  background: rgba(99, 102, 241, 0.05); 
-  border: 1px dashed rgba(99, 102, 241, 0.2); 
-  border-radius: 24px; 
-  padding: 20px; 
-  margin: 15px 0; 
-}
-
-/* 徽章大方塊 (Grid) */
-.badge-grid { 
-  display: grid; 
-  grid-template-columns: repeat(4, 1fr); 
-  gap: 10px; 
-}
-
-.badge-btn {
-  aspect-ratio: 1/1; 
-  background: #1a1a1a; 
-  border: 1px solid #333; 
-  border-radius: 15px;
-  display: flex; 
-  flex-direction: column; 
-  align-items: center; 
-  justify-content: center; 
-  transition: 0.2s;
-}
-
-.badge-btn.active { 
-  background: var(--accent); 
-  border-color: var(--accent); 
-  color: white; 
-}
-
-.hot-item { 
-  background: rgba(255, 140, 0, 0.1) !important; 
-  color: #ff8c00 !important; 
-  font-weight: 800 !important; 
-}
-
-.select2-dropdown { 
-  background: #1e1e1e !important; 
-  border: 1px solid #333 !important; 
-  border-radius: 12px !important; 
-}
+.select2-dropdown { background: #1e1e1e !important; border: 1px solid #333 !important; border-radius: 12px !important; }

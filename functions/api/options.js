@@ -22,8 +22,19 @@ export async function onRequestGet(context) {
       `).all()
     ]);
 
-    const survivorsList = (survivorsRes.results || []).map(s => ({ name: s.name, is_hot: false }));
-    const huntersList = (huntersRes.results || []).map(h => ({ name: h.name, is_hot: false }));
+    // 基於名稱合成頭像路徑 (優先使用中文名稱辨認)
+    const getPortrait = (name) => {
+      // 編碼中文檔名以確保 URL 相容性 (例如 機械師.png -> %E6%A9%9F%E6%A2%B0%E5%B8%AB.png)
+      const encodedName = encodeURIComponent(name);
+      return { 
+        name, 
+        is_hot: false, 
+        portrait: `/static/images/char/${encodedName}.png` 
+      };
+    };
+
+    const survivorsList = (survivorsRes.results || []).map(s => getPortrait(s.name));
+    const huntersList = (huntersRes.results || []).map(h => ({ name: h.name, is_hot: false, portrait: `/static/images/char/h_${h.name}.png` })); // 監管者暫時也留個路徑
 
     if (hotRecordsRes.results && hotRecordsRes.results.length > 0) {
       const gC = {}; const mC = {};
