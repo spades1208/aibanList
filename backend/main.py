@@ -66,12 +66,13 @@ async def predict_hunter(body: PredictRequest, request: Request):
     """
     加權推演系統：地圖基礎分 + 分層 Ban 位匹配 + 徽章權重
     """
-    # 從 D1 抓取此地圖的歷史記錄
-    records = await d1_service.query(
-        "SELECT * FROM match_records WHERE map_name = ?", 
-        [body.map_name], 
-        request=request
-    )
+    # 從 D1 抓取此地圖的歷史記錄，並過濾掉黑名單用戶的數據
+    sql = """
+        SELECT r.* FROM match_records r
+        LEFT JOIN users u ON r.added_by_uid = u.id
+        WHERE r.map_name = ? AND (u.is_blacklisted IS NULL OR u.is_blacklisted = 0)
+    """
+    records = await d1_service.query(sql, [body.map_name], request=request)
     
     # 1. 載入地圖基礎分 (底層邏輯)
     counts = {}
@@ -246,8 +247,14 @@ async def get_options(request: Request, map_name: str = None):
     survivors_dict = {r["name"]: {"name": r["name"], "is_hot": False, "is_map_specific": False} for r in surv_rows}
     hunters_dict = {r["name"]: {"name": r["name"], "is_hot": False, "is_map_specific": False} for r in hunt_rows}
     
-    # 2. 讀取實戰數據進行熱門度統計
-    records = await d1_service.query("SELECT map_name, hunter_name, ban_survivors FROM match_records", request=request)
+    # 2. 讀取實戰數據進行熱門度統計 (過濾黑名單)
+    sql_records = """
+        SELECT r.map_name, r.hunter_name, r.ban_survivors 
+        FROM match_records r
+        LEFT JOIN users u ON r.added_by_uid = u.id
+        WHERE (u.is_blacklisted IS NULL OR u.is_blacklisted = 0)
+    """
+    records = await d1_service.query(sql_records, request=request)
     
     map_counts = {"surv": {}, "hunt": {}}
     global_counts = {"surv": {}, "hunt": {}}

@@ -11,7 +11,13 @@ export async function onRequestPost(context) {
         if (!authHeader || !authHeader.startsWith("Bearer ")) return new Response("Auth required", { status: 401 });
         
         const idToken = authHeader.split(" ")[1];
-        const payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const parts = idToken.split('.');
+        const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const binString = atob(base64);
+        const bytes = new Uint8Array(binString.length);
+        for (let i = 0; i < binString.length; i++) { bytes[i] = binString.charCodeAt(i); }
+        const payload = JSON.parse(new TextDecoder().decode(bytes));
+        
         const uid = payload.uid || payload.sub;
         const name = payload.name || "Unknown User";
 

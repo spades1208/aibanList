@@ -2,7 +2,7 @@ import { auth, signInWithGoogle, onAuthStateChanged, getIdToken } from "./auth.j
 
 // --- API Helper ---
 const API_BASE = (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  ? `https://aibanlist.pages.dev/api`
   : "/api"; 
 
 async function apiFetch(path, options = {}) {
@@ -57,6 +57,7 @@ export async function executePredictionLogic(mapName, banSurvivors) {
       body: JSON.stringify({ map_name: mapName, ban_survivors: banSurvivors.filter(b => b) })
     });
   } catch (err) { 
+    console.error("[Prediction Error]", err);
     return { predictions: [], precision_label: "Connection Error" }; 
   }
 }
@@ -79,12 +80,14 @@ export async function fetchOptionsData(activeMapName = "") {
       window.siteVersion = data.current_version;
       $("#app-version-display").text(window.siteVersion);
     }
-    return { 
+    const res = { 
       maps: data.maps || FALLBACK_MAPS, 
       survivors: data.survivors || FALLBACK_SURVIVORS.map(n => ({ name: n, is_hot: false })), 
       hunters: data.hunters || FALLBACK_HUNTERS.map(n => ({ name: n, is_hot: false })),
       version: data.current_version || "Season 41"
     };
+    window.allHunters = res.hunters;
+    return res;
   } catch (err) {
     return { maps: FALLBACK_MAPS, survivors: FALLBACK_SURVIVORS.map(n => ({name: n, is_hot: false})), hunters: FALLBACK_HUNTERS.map(n => ({name: n, is_hot: false})) };
   }
@@ -97,11 +100,11 @@ export function renderOptions(selector, items, placeholder) {
   const hots = items.filter(i => i.is_hot);
   const others = items.filter(i => !i.is_hot);
   if (hots.length > 0) {
-    const g = $('<optgroup label="🔥 Hot Picks"></optgroup>');
+    const g = $('<optgroup label="🔥 熱門推薦"></optgroup>');
     hots.forEach(i => { g.append(new Option(`🔥 ${i.name}`, i.name)); });
     $el.append(g);
   }
-  const gAll = $('<optgroup label="All"></optgroup>');
+  const gAll = $('<optgroup label="所有角色"></optgroup>');
   others.forEach(i => gAll.append(new Option(i.name, i.name)));
   $el.append(gAll);
   $el.select2({ placeholder, width: '100%', allowClear: true });
@@ -129,12 +132,50 @@ async function executePrediction() {
           </div>
         `);
         if (i === 0) {
-            $l.append(`<div id="feedback-inline-box" class="feedback-inline p-4"><p class="text-center text-slate-500 text-[10px] mb-2 uppercase">Is this correct?</p><div class="flex gap-2"><button id="f-yes" class="flex-1 bg-emerald-500/10 py-3 rounded-xl text-emerald-400 font-bold text-xs">Yes</button><button id="f-no" class="flex-1 bg-red-500/10 py-3 rounded-xl text-red-400 font-bold text-xs">No</button></div></div>`);
+            $l.append(`<div id="feedback-inline-box" class="feedback-inline p-4"><p class="text-center text-slate-500 text-[10px] mb-2 uppercase">資料是否正確？</p><div class="flex gap-2"><button id="f-yes" class="flex-1 bg-emerald-500/10 py-3 rounded-xl text-emerald-400 font-bold text-xs">是</button><button id="f-no" class="flex-1 bg-red-500/10 py-3 rounded-xl text-red-400 font-bold text-xs">否</button></div></div>`);
             $("#f-yes").on("click", async () => {
                 await submitMatchFeedback(map, bans, p.hunter_name, "C");
-                $("#feedback-inline-box").html('<p class="text-center text-emerald-400 font-bold text-xs py-2">Thanks for contributing!</p>');
+                $("#feedback-inline-box").html('<p class="text-center text-emerald-400 font-bold text-xs py-2">感謝您的配合與貢獻！</p>');
             });
-            $("#f-no").on("click", () => alert("Feature coming soon: Manual correction form"));
+            $("#f-no").on("click", async () => {
+                const hunterOptions = (window.allHunters || []).map(h => `<option value="${h.name}">${h.name}</option>`).join('');
+                const { value: formValues } = await Swal.fire({
+                  title: '手動更正數據',
+                  html: `
+                    <div class="text-left space-y-4">
+                      <div>
+                        <label class="text-[10px] uppercase font-black text-slate-500 mb-2 block">實際監管者</label>
+                        <select id="swal-hunter" class="swal2-select w-full m-0">${hunterOptions}</select>
+                      </div>
+                      <div>
+                        <label class="text-[10px] uppercase font-black text-slate-500 mb-2 block">徽章等級</label>
+                        <select id="swal-badge" class="swal2-select w-full m-0">
+                          <option value="">無 (或是 C 級以下)</option>
+                          <option value="S">S 級徽章</option>
+                          <option value="A">A 級徽章</option>
+                          <option value="B">B 級徽章</option>
+                          <option value="C">C 級徽章</option>
+                        </select>
+                      </div>
+                    </div>
+                  `,
+                  focusConfirm: false,
+                  showCancelButton: true,
+                  confirmButtonText: '提交更正',
+                  cancelButtonText: '取消',
+                  preConfirm: () => {
+                    return {
+                      hunter: document.getElementById('swal-hunter').value,
+                      badge: document.getElementById('swal-badge').value
+                    }
+                  }
+                });
+                
+                if (formValues && formValues.hunter) {
+                  await submitMatchFeedback(map, bans, formValues.hunter, formValues.badge || "C");
+                  $("#feedback-inline-box").html('<p class="text-center text-indigo-400 font-bold text-xs py-2">已提交更正，感謝您的貢獻！</p>');
+                }
+            });
         }
       });
     }
@@ -143,8 +184,8 @@ async function executePrediction() {
 
 async function loadInitialData(mapName = null) {
   const d = await fetchOptionsData(mapName);
-  if (!mapName && d.maps) renderOptions("#predict-map", d.maps.map(m => ({name: m})), "-- SELECT MAP --");
-  if (d.survivors) renderOptions(".survivor-select", d.survivors, "(No Ban)");
+  if (!mapName && d.maps) renderOptions("#predict-map", d.maps.map(m => ({name: m})), "-- 請選擇地圖 --");
+  if (d.survivors) renderOptions(".survivor-select", d.survivors, "(無 Ban 位)");
 }
 
 // --- UI Mutex (Prevent duplicate picks) ---
@@ -209,7 +250,7 @@ $(() => {
         const idToken = await u.getIdToken(true);
         const userData = await apiFetch('/auth/verify', { method: "POST", body: JSON.stringify({ id_token: idToken }) });
         if (userData.role?.toLowerCase() === "admin") {
-          $("#admin-tag-container").html(`<a href="./admin.html" class="bg-indigo-600 text-white text-[10px] px-2 py-1 rounded">Admin Panel</a>`);
+          $("#admin-tag-container").html(`<a href="./admin.html" class="bg-indigo-600 text-white text-[10px] px-2 py-1 rounded shadow-lg shadow-indigo-500/30">管理後台</a>`);
         }
       } catch (err) { console.error(err); }
       await loadInitialData();

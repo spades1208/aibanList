@@ -13,7 +13,13 @@ export async function onRequestGet(context) {
       db.prepare("SELECT name FROM survivors").all(),
       db.prepare("SELECT name FROM hunters").all(),
       db.prepare("SELECT value FROM configs WHERE key = 'current_version' LIMIT 1").first(),
-      db.prepare("SELECT map_name, ban_survivors FROM match_records ORDER BY reported_at DESC LIMIT 50").all()
+      db.prepare(`
+        SELECT r.map_name, r.ban_survivors 
+        FROM match_records r
+        LEFT JOIN users u ON r.added_by_uid = u.id
+        WHERE (u.is_blacklisted IS NULL OR u.is_blacklisted = 0)
+        ORDER BY r.reported_at DESC LIMIT 50
+      `).all()
     ]);
 
     const survivorsList = (survivorsRes.results || []).map(s => ({ name: s.name, is_hot: false }));

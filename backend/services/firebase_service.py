@@ -11,8 +11,17 @@ def get_firebase_app():
         _app = firebase_admin.initialize_app(cred)
     return _app
 
+import time
+
 def verify_id_token(id_token: str) -> dict:
-    """驗證 Firebase ID Token，回傳解碼後的使用者資訊"""
+    """驗證 Firebase ID Token，加入時鐘誤差容錯 (Clock Skew Leeway)"""
     get_firebase_app()
-    decoded = auth.verify_id_token(id_token)
-    return decoded
+    try:
+        return auth.verify_id_token(id_token)
+    except Exception as e:
+        # 如果報錯訊息包含 "used too early"，代表時鐘差了 1-2 秒，自動等待後重試
+        if "too early" in str(e).lower():
+            print(f"⏰ Clock skew detected, retrying in 1.5s...")
+            time.sleep(1.5)
+            return auth.verify_id_token(id_token)
+        raise e

@@ -25,7 +25,14 @@ export async function onRequest(context) {
             const total_count = countRes ? countRes.total : 0;
 
             const offset = (page - 1) * pageSize;
-            const { results } = await db.prepare(`SELECT * FROM match_records ${whereSql} ORDER BY reported_at DESC LIMIT ? OFFSET ?`).bind(...params, pageSize, offset).all();
+            const { results } = await db.prepare(`
+                SELECT r.*, u.is_blacklisted 
+                FROM match_records r
+                LEFT JOIN users u ON r.added_by_uid = u.id
+                ${whereSql} 
+                ORDER BY r.id DESC 
+                LIMIT ? OFFSET ?
+            `).bind(...params, pageSize, offset).all();
             const records = (results || []).map(r => {
                 try { r.ban_survivors = JSON.parse(r.ban_survivors || "[]"); } catch (e) { r.ban_survivors = []; }
                 return r;

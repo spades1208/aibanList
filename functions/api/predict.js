@@ -21,7 +21,11 @@ export async function onRequestPost(context) {
         const BADGE_WEIGHTS = { "S": 5.0, "A": 3.0, "B": 1.5, "C": 1.0, "unknown": 1.0 };
         const MATCH_WEIGHTS = { 3: 1.0, 2: 0.6, 1: 0.3 };
 
-        const { results } = await db.prepare("SELECT * FROM match_records WHERE map_name = ?").bind(map_name).all();
+        const { results } = await db.prepare(`
+            SELECT r.* FROM match_records r
+            LEFT JOIN users u ON r.added_by_uid = u.id
+            WHERE r.map_name = ? AND (u.is_blacklisted IS NULL OR u.is_blacklisted = 0)
+        `).bind(map_name).all();
         const counts = {};
         const base_data = MAP_BASE_SCORES[map_name] || {};
         for (const [h, score] of Object.entries(base_data)) counts[h] = score;

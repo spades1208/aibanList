@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     photo_url TEXT,
     role TEXT DEFAULT 'user',
+    is_blacklisted INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

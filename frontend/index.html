@@ -10,6 +10,14 @@
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
   <link rel="stylesheet" href="./style.css" />
+  <!-- SweetAlert2 -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style>
+    .swal2-popup { background: #0f172a !important; color: white !important; border: 1px solid rgba(255,255,255,0.1); border-radius: 2rem !important; }
+    .swal2-title { color: #818cf8 !important; }
+    .swal2-select { background: #1e293b !important; color: white !important; border-radius: 0.75rem !important; height: 3rem !important; }
+    .swal2-confirm { background: #6366f1 !important; border-radius: 0.75rem !important; }
+  </style>
 </head>
 <body class="p-4 md:p-12 flex justify-center">
 
@@ -60,7 +68,7 @@
           
           <!-- 空白佔位：預設狀態 -->
           <div id="results-placeholder" class="hidden flex-1 glass rounded-[2.5rem] flex items-center justify-center border-dashed border-slate-800">
-            <p class="text-slate-600 font-bold uppercase tracking-widest text-xs">Waiting for Map Data</p>
+            <p class="text-slate-600 font-bold uppercase tracking-widest text-xs">等待地圖數據中...</p>
           </div>
         </div>
       </div>
