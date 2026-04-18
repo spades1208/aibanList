@@ -77,8 +77,8 @@ export async function fetchOptionsData(activeMapName = "") {
     if (activeMapName) url += `?map_name=${encodeURIComponent(activeMapName)}`;
     const data = await apiFetch(url);
     if (data.current_version) {
-      window.siteVersion = data.current_version;
-      $("#app-version-display").text(window.siteVersion);
+      window.dataVersion = data.current_version; // 切換為數據版本命名
+      $("#app-data-version").text(window.dataVersion);
     }
     const res = { 
       maps: data.maps || FALLBACK_MAPS, 
