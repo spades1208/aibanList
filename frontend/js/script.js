@@ -179,6 +179,7 @@ async function executePrediction() {
           <div class="glass p-6 rounded-[2rem] border border-white/5 flex items-center justify-between transition hover:border-indigo-500/30">
             <div class="flex items-center gap-4">
               <span class="text-indigo-500 font-black text-xl">${i+1}</span>
+              <img src="/static/images/char/${encodeURIComponent(p.hunter_name)}.png" onerror="this.src='https://placehold.co/100x120/1a1a1a/666?text=?'" class="w-12 h-12 rounded-xl object-cover border border-white/5 shadow-2xl">
               <div class="flex flex-col">
                 <span class="text-slate-100 font-bold text-lg">${p.hunter_name}</span>
                 <span class="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-0.5">相關樣本權重: ${p.weight || 0}</span>

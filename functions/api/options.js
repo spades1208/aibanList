@@ -34,7 +34,7 @@ export async function onRequestGet(context) {
     };
 
     const survivorsList = (survivorsRes.results || []).map(s => getPortrait(s.name));
-    const huntersList = (huntersRes.results || []).map(h => ({ name: h.name, is_hot: false, portrait: `/static/images/char/h_${h.name}.png` })); // 監管者暫時也留個路徑
+    const huntersList = (huntersRes.results || []).map(h => getPortrait(h.name));
 
     if (hotRecordsRes.results && hotRecordsRes.results.length > 0) {
       const gC = {}; const mC = {};
