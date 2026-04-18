@@ -10,13 +10,13 @@ export async function onRequestPost(context) {
         if (!map_name) return new Response(JSON.stringify({ error: "Missing map_name" }), { status: 400 });
 
         const MAP_BASE_SCORES = {
-            "里奧的回憶": { "隱士": 10.0, "歌劇演員": 10.0, "『使徒』": 5.0 },
-            "永眠鎮": { "隱士": 10.0, "宿傘之魂": 8.0, "守夜人": 8.0 },
-            "紅教堂": { "紅蝶": 10.0, "守夜人": 10.0, "漁女": 5.0 },
-            "聖心醫院": { "時空之影": 10.0, "雕刻家": 10.0, "夢之女巫": 5.0 },
-            "軍工廠": { "歌劇演員": 10.0, "漁女": 10.0, "廠長": 5.0 },
-            "月亮河公園": { "『傑克』": 8.0, "蜘蛛": 8.0, "宿傘之魂": 5.0 },
-            "湖景村": { "漁女": 12.0, "黃衣之主": 8.0, "『使徒』": 5.0 },
+            "里奧的回憶": { "隱士": 0.1, "歌劇演員": 0.1, "『使徒』": 0.05 },
+            "永眠鎮": { "隱士": 0.1, "宿傘之魂": 0.08, "守夜人": 0.08 },
+            "紅教堂": { "紅蝶": 0.1, "守夜人": 0.1, "漁女": 0.05 },
+            "聖心醫院": { "時空之影": 0.1, "雕刻家": 0.1, "夢之女巫": 0.05 },
+            "軍工廠": { "歌劇演員": 0.1, "漁女": 0.1, "廠長": 0.05 },
+            "月亮河公園": { "『傑克』": 0.08, "蜘蛛": 0.08, "宿傘之魂": 0.05 },
+            "湖景村": { "漁女": 0.12, "黃衣之主": 0.08, "『使徒』": 0.05 },
         };
         const BADGE_WEIGHTS = { "S": 5.0, "A": 3.0, "B": 1.5, "C": 1.0, "unknown": 1.0 };
         const MATCH_WEIGHTS = { 3: 1.0, 2: 0.6, 1: 0.3 };
@@ -26,17 +26,15 @@ export async function onRequestPost(context) {
             LEFT JOIN users u ON r.added_by_uid = u.id
             WHERE r.map_name = ? AND (u.is_blacklisted IS NULL OR u.is_blacklisted = 0)
         `).bind(map_name).all();
+
         const counts = {};
-        const match_counts = {}; // 新增：追蹤真實出現次數
         const base_data = MAP_BASE_SCORES[map_name] || {};
         for (const [h, score] of Object.entries(base_data)) {
             counts[h] = score;
-            match_counts[h] = 0; // 基礎分不計入真實比賽次數
         }
 
         let total_score = Object.values(counts).reduce((a, b) => a + b, 0);
         const inputBans = new Set(ban_survivors || []);
-        let maxMatchesFound = 0;
 
         results.forEach(record => {
             let recordBans = [];
@@ -45,17 +43,24 @@ export async function onRequestPost(context) {
             const recordBansSet = new Set(recordBans);
             const intersection = [...inputBans].filter(x => recordBansSet.has(x));
             const matchCount = intersection.length;
-            if (matchCount > 0 || inputBans.size === 0) {
-                const weightTier = inputBans.size > 0 ? (MATCH_WEIGHTS[matchCount] || 0.1) : 1.0;
-                if (matchCount > maxMatchesFound) maxMatchesFound = matchCount;
-                const hunter = record.hunter_name || "未知監管者";
-                const badge = record.badge_level || "unknown";
-                const badgeWeight = BADGE_WEIGHTS[badge] || 1.0;
-                const contribution = weightTier * badgeWeight;
-                counts[hunter] = (counts[hunter] || 0) + contribution;
-                match_counts[hunter] = (match_counts[hunter] || 0) + 1; // 增加真實次數
-                total_score += contribution;
+            
+            // 計算匹配權重
+            let weightTier = 0.01; // 極低基礎分 (完全沒匹配)
+            if (inputBans.size > 0) {
+                if (matchCount > 0) {
+                    weightTier = MATCH_WEIGHTS[matchCount] || 0.1;
+                }
+            } else {
+                weightTier = 1.0; // 若用戶沒選 Ban 位，則視為全量匹配
             }
+
+            const hunter = record.hunter_name || "未知監管者";
+            const badge = record.badge_level || "unknown";
+            const badgeWeight = BADGE_WEIGHTS[badge] || 1.0;
+            const contribution = weightTier * badgeWeight;
+            
+            counts[hunter] = (counts[hunter] || 0) + contribution;
+            total_score += contribution;
         });
 
         if (total_score <= 0) return new Response(JSON.stringify({ predictions: [], total_score: 0, precision_label: "數據稀缺" }), { headers: { "Content-Type": "application/json" } });
@@ -63,7 +68,7 @@ export async function onRequestPost(context) {
         const predictions = sortedHunters.map(([h, c]) => ({ 
             hunter_name: h, 
             score: Math.round(c * 10) / 10, 
-            count: match_counts[h] || 0, // 回傳次數
+            weight: Math.round(c * 10) / 10, // 回傳加權權重 N
             percentage: ((c / total_score) * 100).toFixed(1) + "%" 
         }));
 
