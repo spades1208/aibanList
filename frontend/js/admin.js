@@ -37,6 +37,15 @@ async function updateVersionAPI(newVersion) {
   } catch (e) { return false; }
 }
 
+async function fixRecordsAPI() {
+  try {
+    return await apiFetch('/admin/fix_records', { method: 'POST' });
+  } catch (e) { 
+    console.error("fixRecordsAPI failed:", e);
+    return { success: false, error: e.message }; 
+  }
+}
+
 async function fetchRecordsAPI(page = 1, map_name = "", hunter_name = "") {
   try {
     const page_size = 15;
@@ -49,9 +58,32 @@ async function fetchRecordsAPI(page = 1, map_name = "", hunter_name = "") {
 
 async function deleteRecordAPI(id) {
   try {
-    // We'll use a query param for simpler routing in Cloudflare Functions
-    await apiFetch(`/admin/records?id=${id}`, { method: 'DELETE' });
+    await apiFetch(`/admin/records/${id}`, { method: 'DELETE' });
     return true;
+  } catch (e) { return false; }
+}
+
+async function verifyRecordAPI(id) {
+  try {
+    return await apiFetch(`/admin/records/${id}/verify`, { method: 'PATCH' });
+  } catch (e) { return false; }
+}
+
+async function flagRecordAPI(id) {
+  try {
+    return await apiFetch(`/admin/records/${id}/flag`, { method: 'POST' });
+  } catch (e) { return false; }
+}
+
+async function batchVerifyAPI(ids) {
+  try {
+    return await apiFetch('/admin/records/batch_verify', { method: 'POST', body: JSON.stringify({ record_ids: ids }) });
+  } catch (e) { return false; }
+}
+
+async function restoreReputationAPI(uid) {
+  try {
+    return await apiFetch(`/admin/users/${uid}/restore_reputation`, { method: 'POST' });
   } catch (e) { return false; }
 }
 
@@ -132,12 +164,23 @@ async function renderUsers() {
     const statusLabel = u.is_blacklisted 
       ? `<span class="px-2 py-0.5 rounded text-[9px] bg-red-500/10 text-red-500 border border-red-500/20">隱蔽封鎖中</span>`
       : `<span class="px-2 py-0.5 rounded text-[9px] bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">正常運作</span>`;
-    
+
+    const repColor = u.reputation < 60 ? 'text-red-500' : 'text-emerald-500';
+    const restoreBtn = (u.reputation < 100) 
+      ? `<button class="restore-rep-btn text-amber-500 text-[10px] font-bold hover:underline" data-uid="${u.id}">審核恢復</button>` 
+      : '';
+
     $t.append(`
       <tr class="hover:bg-white/[0.02] border-b border-white/5 transition-colors text-xs">
         <td class="px-6 py-4 text-white">${u.display_name || "N/A"}<div class="text-[9px] text-slate-600 font-mono mt-1">${u.id}</div></td>
         <td class="px-6 py-4 text-slate-500">${u.email}</td>
         <td class="px-6 py-4">${statusLabel}</td>
+        <td class="px-6 py-4">
+          <div class="flex items-center gap-2">
+            <span class="font-mono font-bold ${repColor}">${u.reputation || 100}</span>
+            ${restoreBtn}
+          </div>
+        </td>
         <td class="px-6 py-4">
           <span class="px-2 py-1 rounded text-[10px] uppercase font-bold bg-slate-800 text-indigo-400">
             ${u.role}
@@ -194,6 +237,11 @@ async function renderBanlist() {
 async function renderRecords() {
   if (isFetching) return;
   isFetching = true;
+  
+  // 重置批量勾選狀態
+  $("#check-all-records").prop("checked", false);
+  updateBatchButton();
+
   const mapFilter = $("#filter-map").val();
   const hunterFilter = $("#filter-hunter").val();
   const data = await fetchRecordsAPI(currentPage, mapFilter, hunterFilter);
@@ -214,17 +262,37 @@ async function renderRecords() {
       
       const contributor = r.is_blacklisted 
         ? `<span class="text-red-500 font-bold decoration-wavy underline decoration-red-900/50" title="數據已失效">${r.added_by_name || "System"}</span> <span class="text-[8px] bg-red-950/30 text-red-500 px-1 rounded ml-1">無效</span>`
-        : `<span class="text-slate-500">${r.added_by_name || "System"}</span>`;
+        : `<span class="text-slate-200 font-medium">${r.added_by_name || "System"}</span>`;
+      
+      const repTag = r.reputation < 60 ? '<span class="text-red-500 font-black ml-1">⚠️</span>' : '';
+      
+      const badgeIcon = (r.badge_level && r.badge_level !== 'unknown')
+        ? `<img src="/static/images/badges/${r.badge_level}.png" class="w-4 h-4 inline-block ml-1" title="${r.badge_level}級勳章">`
+        : '';
+
+      const verifyStatus = r.is_verified 
+        ? `<span class="text-emerald-400 font-black flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/></svg>已驗證</span>`
+        : `<span class="text-orange-500/50 font-bold italic">待核實</span>`;
 
       $t.append(`
         <tr class="hover:bg-white/[0.02] border-b border-white/5 transition-colors text-xs ${r.is_blacklisted ? 'opacity-40 grayscale-[0.5]' : ''}">
+          <td class="px-6 py-4">
+            <input type="checkbox" class="record-checkbox w-4 h-4 rounded border-white/10 bg-slate-800 accent-indigo-600" data-id="${r.id}" />
+          </td>
           <td class="px-6 py-4 text-white">${r.map_name}</td>
           <td class="px-6 py-4">${bans}</td>
-          <td class="px-6 py-4 text-indigo-400 font-bold">${r.hunter_name}</td>
-          <td class="px-6 py-4">${contributor}</td>
+          <td class="px-6 py-4 text-indigo-400 font-bold flex items-center gap-1">${r.hunter_name} ${badgeIcon}</td>
+          <td class="px-6 py-4">${contributor} <span class="text-[9px] text-slate-600">(${r.reputation || 100})${repTag}</span></td>
           <td class="px-6 py-4 text-[10px] font-mono text-slate-600">${dateStr}</td>
-          <td class="px-6 py-4 text-right">
-            <button class="delete-record-btn text-red-500/50 hover:text-red-500" data-id="${r.id}">
+          <td class="px-6 py-4">${verifyStatus}</td>
+          <td class="px-6 py-4 flex gap-3 justify-end items-center">
+            <button class="verify-record-btn text-emerald-500/70 hover:text-emerald-400 font-black" data-id="${r.id}">
+              ${r.is_verified ? '撤銷' : '驗證'}
+            </button>
+            <button class="flag-record-btn text-orange-500/70 hover:text-orange-500 font-black" data-id="${r.id}" title="標記惡意數據並扣除信譽">
+              舉報
+            </button>
+            <button class="delete-record-btn text-red-500/30 hover:text-red-500" data-id="${r.id}">
               刪除
             </button>
           </td>
@@ -243,6 +311,7 @@ async function renderRecords() {
 async function renderConfigs() {
   const version = await fetchCurrentVersion();
   $("#input-version").val(version);
+  $("#btn-fix-data").text(`修復版本數據 (將所有數據轉為 ${version})`);
 }
 
 function setupEventListeners() {
@@ -265,8 +334,30 @@ function setupEventListeners() {
   
   $("#btn-save-version").on("click", async function() {
     const v = $("#input-version").val();
-    if (await updateVersionAPI(v)) alert("版本號已成功更新至：" + v);
-    else alert("版本更新失敗。");
+    if (await updateVersionAPI(v)) {
+      alert("版本號已成功更新至：" + v);
+      renderConfigs(); // 同步更新修復按鈕文字
+    } else {
+      alert("版本更新失敗。");
+    }
+  });
+
+  $("#btn-fix-data").on("click", async function() {
+    const version = $("#input-version").val();
+    if (confirm(`⚠️ 危險操作確認\n\n確定要將數據庫中「所有」舊版本的戰績記錄，一次性轉為當前版本「${version}」嗎？\n\n此操作不可逆，請確認版本號是否正確。`)) {
+      const $btn = $(this);
+      const originalText = $btn.text();
+      $btn.prop("disabled", true).text("處理中...");
+      
+      const result = await fixRecordsAPI();
+      if (result.success) {
+        alert(result.message || "數據修復完成！");
+      } else {
+        alert("修復失敗：" + (result.error || "未知錯誤"));
+      }
+      
+      $btn.prop("disabled", false).text(originalText);
+    }
   });
 
   $(document).on("click", ".delete-record-btn", async function() {
@@ -302,6 +393,61 @@ function setupEventListeners() {
       }
     }
   });
+
+  $(document).on("click", ".verify-record-btn", async function() {
+    const id = $(this).data("id");
+    if (await verifyRecordAPI(id)) renderRecords();
+    else alert("驗證操作失敗。");
+  });
+
+  $(document).on("click", ".flag-record-btn", async function() {
+    const id = $(this).data("id");
+    if (confirm("⚠️ 惡意數據警告\n\n您確定要標記此數據為『惡意/誤導性』嗎？\n\n這將會：\n1. 永久刪除此條戰績。\n2. 自動扣除該貢獻者 20 點信譽分。")) {
+      if (await flagRecordAPI(id)) renderRecords();
+      else alert("操作失敗。");
+    }
+  });
+
+  $(document).on("click", ".restore-rep-btn", async function() {
+    const uid = $(this).data("uid");
+    if (confirm("🛡️ 人工信譽恢復\n\n確定已完成對該用戶的審核，並將其信譽分恢復至 100 嗎？")) {
+      if (await restoreReputationAPI(uid)) renderUsers();
+      else alert("恢復失敗。");
+    }
+  });
+
+  // 批量選取邏輯
+  $("#check-all-records").on("change", function() {
+    $(".record-checkbox").prop("checked", $(this).prop("checked"));
+    updateBatchButton();
+  });
+
+  $(document).on("change", ".record-checkbox", updateBatchButton);
+
+  $("#btn-batch-verify").on("click", async function() {
+    const selectedIds = $(".record-checkbox:checked").map((_, el) => $(el).data("id")).get();
+    if (selectedIds.length === 0) return;
+
+    if (confirm(`確定要批量驗證選中的 ${selectedIds.length} 筆戰績嗎？`)) {
+      const result = await batchVerifyAPI(selectedIds);
+      if (result && result.status === "success") {
+        alert(result.message);
+        renderRecords();
+      } else {
+        alert("批量驗證失敗。");
+      }
+    }
+  });
+}
+
+function updateBatchButton() {
+  const count = $(".record-checkbox:checked").length;
+  if (count > 0) {
+    $("#btn-batch-verify").removeClass("hidden").css('display', 'flex');
+    $("#selected-count").text(count);
+  } else {
+    $("#btn-batch-verify").addClass("hidden").css('display', 'none');
+  }
 }
 
 onAuthStateChanged(auth, async (u) => {

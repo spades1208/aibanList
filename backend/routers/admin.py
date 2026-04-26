@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Header, Request, HTTPException
 from services import d1_service
 from services.firebase_service import verify_id_token
-from models.schemas import BanEntry, BanResponse, MatchRecord
+from models.schemas import BanEntry, BanResponse, MatchRecord, VersionUpdateRequest
 from typing import List, Optional
 import json
 
@@ -56,7 +56,7 @@ async def list_users(
     
     # 2. 執行分頁查詢
     offset = (page - 1) * page_size
-    query_sql = f"SELECT * FROM users{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    query_sql = f"SELECT id, email, display_name, photo_url, role, is_blacklisted, reputation, created_at FROM users{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"
     users = await d1_service.query(query_sql, params + [page_size, offset], request=request)
     
     return {
@@ -136,10 +136,10 @@ async def list_records(
     count_rows = await d1_service.query(f"SELECT COUNT(*) as total FROM match_records{where_sql}", params, request=request)
     total_count = count_rows[0]["total"] if count_rows else 0
     
-    # 3. 執行分頁查詢 (Join users 表以獲取黑名單狀態)
+    # 3. 執行分頁查詢 (Join users 表以獲取黑名單狀態與信譽)
     offset = (page - 1) * page_size
     query_sql = f"""
-        SELECT r.*, u.is_blacklisted 
+        SELECT r.*, u.is_blacklisted, u.reputation
         FROM match_records r
         LEFT JOIN users u ON r.added_by_uid = u.id
         {where_sql} 
@@ -164,6 +164,95 @@ async def list_records(
 
 @router.delete("/records/{record_id}")
 async def delete_record(request: Request, record_id: int, admin_uid: str = Depends(require_admin)):
-    """刪除特定戰績記錄"""
+    """管理員刪除特定戰績記錄 (不扣分，用於清理數據)"""
     await d1_service.execute("DELETE FROM match_records WHERE id = ?", [record_id], request=request)
     return {"message": f"Record {record_id} deleted"}
+
+@router.post("/records/batch_verify")
+async def batch_verify(request: Request, body: dict, admin_uid: str = Depends(require_admin)):
+    """批量驗證多筆戰績"""
+    record_ids = body.get("record_ids", [])
+    if not record_ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+    
+    placeholders = ",".join(["?"] * len(record_ids))
+    sql = f"UPDATE match_records SET is_verified = 1 WHERE id IN ({placeholders})"
+    await d1_service.execute(sql, record_ids, request=request)
+    
+    return {"status": "success", "message": f"Successfully verified {len(record_ids)} records"}
+
+@router.post("/update_version")
+async def update_version(body: VersionUpdateRequest, request: Request, admin_uid: str = Depends(require_admin)):
+    """更新當前版本號碼 (Admin 專屬)"""
+    await d1_service.execute(
+        "UPDATE configs SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = 'current_version'",
+        [body.new_version],
+        request=request
+    )
+    return {"status": "success", "new_version": body.new_version}
+
+@router.post("/fix_records")
+async def fix_records(request: Request, admin_uid: str = Depends(require_admin)):
+    """將所有舊數據版本修復為當前最新版本 (Admin 專屬)"""
+    # 1. 抓取當前版本
+    rows = await d1_service.query("SELECT value FROM configs WHERE key = 'current_version'", request=request)
+    if not rows:
+        raise HTTPException(status_code=500, detail="Current version config not found")
+    
+    current_version = rows[0]["value"]
+    
+    # 2. 更新所有版本不一致的數據
+    meta = await d1_service.execute(
+        "UPDATE match_records SET version = ? WHERE version != ?",
+        [current_version, current_version],
+        request=request
+    )
+    
+    updated_count = meta.get("rows_affected", 0)
+    return {
+        "status": "success", 
+        "message": f"數據修復完成，共更新 {updated_count} 筆記錄至版本 {current_version}",
+        "updated_count": updated_count
+    }
+
+# ── 驗證與信譽管理系統 ──────────────────────────────────────
+
+@router.patch("/records/{record_id}/verify")
+async def verify_record(request: Request, record_id: int, admin_uid: str = Depends(require_admin)):
+    """切換戰績驗證狀態 (is_verified)"""
+    # 先獲取當前狀態
+    rows = await d1_service.query("SELECT is_verified FROM match_records WHERE id = ?", [record_id], request=request)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Record not found")
+    
+    new_val = 1 if rows[0]["is_verified"] == 0 else 0
+    await d1_service.execute("UPDATE match_records SET is_verified = ? WHERE id = ?", [new_val, record_id], request=request)
+    return {"message": f"Record {record_id} verification set to {new_val}"}
+
+@router.post("/records/{record_id}/flag")
+async def flag_record(request: Request, record_id: int, admin_uid: str = Depends(require_admin)):
+    """標記為惡意數據：刪除記錄並扣除提交者信譽分 (20)"""
+    # 1. 獲取提交者資訊
+    rows = await d1_service.query("SELECT added_by_uid FROM match_records WHERE id = ?", [record_id], request=request)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Record not found")
+    
+    uid = rows[0]["added_by_uid"]
+    
+    # 2. 扣除信譽分 (最低降至 0)
+    if uid:
+        await d1_service.execute(
+            "UPDATE users SET reputation = MAX(0, reputation - 20) WHERE id = ?",
+            [uid], request=request
+        )
+    
+    # 3. 刪除記錄
+    await d1_service.execute("DELETE FROM match_records WHERE id = ?", [record_id], request=request)
+    
+    return {"message": f"Record {record_id} flagged and deleted. Submitter {uid} reputation deducted."}
+
+@router.post("/users/{uid}/restore_reputation")
+async def restore_reputation(request: Request, uid: str, admin_uid: str = Depends(require_admin)):
+    """人工審核：恢復用戶信譽分至 100"""
+    await d1_service.execute("UPDATE users SET reputation = 100 WHERE id = ?", [uid], request=request)
+    return {"message": f"User {uid} reputation restored to 100"}

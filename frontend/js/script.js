@@ -171,72 +171,175 @@ async function executePrediction() {
   $("#results-placeholder").hide();
   try {
     const d = await executePredictionLogic(map, bans);
-    const $l = $("#results-list").empty();
-    $("#precision-tag").text(d.precision_label);
-    if (d.predictions?.length > 0) {
-      d.predictions.forEach((p, i) => {
-        $l.append(`
-          <div class="glass p-6 rounded-[2rem] border border-white/5 flex items-center justify-between transition hover:border-indigo-500/30">
-            <div class="flex items-center gap-4">
-              <span class="text-indigo-500 font-black text-xl">${i+1}</span>
-              <img src="/static/images/char/${encodeURIComponent(p.hunter_name)}.png" onerror="this.src='https://placehold.co/100x120/1a1a1a/666?text=?'" class="w-12 h-12 rounded-xl object-cover border border-white/5 shadow-2xl">
-              <div class="flex flex-col">
-                <span class="text-slate-100 font-bold text-lg">${p.hunter_name}</span>
-                <span class="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-0.5">相關樣本權重: ${p.weight || 0}</span>
-              </div>
-            </div>
-            <div class="text-indigo-400 font-black text-xl tracking-tighter">${p.percentage}</div>
+    renderPredictResults(d.predictions, d.precision_label, map, bans);
+  } catch(e) { console.error(e); }
+}
+
+function renderPredictResults(predictions, precisionLabel, map, bans) {
+  const $l = $("#results-list").empty();
+  $("#precision-tag").text(precisionLabel);
+
+  if (!predictions || predictions.length === 0) {
+    return;
+  }
+
+  // 執行雙重排序：加權權重 (weight) DESC -> 預測機率 (percentage) DESC
+  const sorted = [...predictions].sort((a, b) => {
+    // 1. 比較權重
+    if (b.weight !== a.weight) return b.weight - a.weight;
+    // 2. 權重相同時比較機率 (解析 "%" 符號)
+    const probA = parseFloat(a.percentage);
+    const probB = parseFloat(b.percentage);
+    return probB - probA;
+  });
+
+  sorted.forEach((p, i) => {
+    $l.append(`
+      <div class="glass p-6 rounded-[2rem] border border-white/5 flex items-center justify-between transition hover:border-indigo-500/30">
+        <div class="flex items-center gap-4">
+          <span class="text-indigo-500 font-black text-xl">${i+1}</span>
+          <img src="/static/images/char/${encodeURIComponent(p.hunter_name)}.png" onerror="this.src='https://placehold.co/100x120/1a1a1a/666?text=?'" class="w-12 h-12 rounded-xl object-cover border border-white/5 shadow-2xl">
+          <div class="flex flex-col">
+            <span class="text-slate-100 font-bold text-lg">${p.hunter_name}</span>
+            <span class="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-0.5">相關樣本權重: ${p.weight || 0}</span>
           </div>
-        `);
-        if (i === 0) {
-            $l.append(`<div id="feedback-inline-box" class="feedback-inline p-4"><p class="text-center text-slate-500 text-[10px] mb-2 uppercase">資料是否正確？</p><div class="flex gap-2"><button id="f-yes" class="flex-1 bg-emerald-500/10 py-3 rounded-xl text-emerald-400 font-bold text-xs">是</button><button id="f-no" class="flex-1 bg-red-500/10 py-3 rounded-xl text-red-400 font-bold text-xs">否</button></div></div>`);
-            $("#f-yes").on("click", async () => {
-                await submitMatchFeedback(map, bans, p.hunter_name, "C");
-                $("#feedback-inline-box").html('<p class="text-center text-emerald-400 font-bold text-xs py-2">感謝您的配合與貢獻！</p>');
+        </div>
+        <div class="text-indigo-400 font-black text-xl tracking-tighter">${p.percentage}</div>
+      </div>
+    `);
+
+    if (i === 0) {
+      $l.append(`
+        <div id="feedback-inline-box" class="feedback-inline p-4">
+          <p class="text-center text-slate-500 text-[10px] mb-2 uppercase">資料是否正確？</p>
+          <div class="flex gap-2">
+            <button id="f-yes" class="flex-1 bg-emerald-500/10 py-3 rounded-xl text-emerald-400 font-bold text-xs">是</button>
+            <button id="f-no" class="flex-1 bg-red-500/10 py-3 rounded-xl text-red-400 font-bold text-xs">否</button>
+          </div>
+        </div>
+      `);
+      
+      $("#f-yes").on("click", async () => {
+        let selectedBadge = "C"; 
+
+        const badgeRowHtml = `
+          <div class="badge-selection-row">
+            <div class="badge-item" data-badge="S" title="S級徽章"><img src="/static/images/badges/S.png"></div>
+            <div class="badge-item" data-badge="A" title="A級徽章"><img src="/static/images/badges/A.png"></div>
+            <div class="badge-item" data-badge="B" title="B級徽章"><img src="/static/images/badges/B.png"></div>
+            <div class="badge-item selected" data-badge="C" title="C級徽章"><img src="/static/images/badges/C.png"></div>
+            <div class="badge-item" data-badge="none" title="無徽章"><img src="/static/images/badges/none.png"></div>
+          </div>
+        `;
+
+        const { value: badge } = await Swal.fire({
+          title: '確認數據與徽章',
+          html: `
+            <div class="text-left space-y-6">
+              <section class="flex items-center gap-4 p-4 glass rounded-2xl">
+                 <img src="/static/images/char/${encodeURIComponent(p.hunter_name)}.png" class="w-16 h-16 rounded-xl border border-white/10" onerror="this.src='https://placehold.co/100/1a1a1a/666?text=?'">
+                 <div>
+                    <p class="text-indigo-400 font-bold text-lg">${p.hunter_name}</p>
+                    <p class="text-[10px] text-slate-500 uppercase font-black">預測正確，請標註徽章等級</p>
+                 </div>
+              </section>
+              <section>
+                <label class="text-[10px] uppercase font-black text-slate-500 mb-3 block">徽章等級 (1/1)</label>
+                ${badgeRowHtml}
+              </section>
+            </div>
+          `,
+          didOpen: () => {
+             const $badges = $(".badge-item");
+             $badges.on("click", function() {
+               $badges.removeClass("selected");
+               $(this).addClass("selected");
+               selectedBadge = $(this).data("badge");
+             });
+          },
+          confirmButtonText: '確認提交',
+          showCancelButton: true,
+          cancelButtonText: '取消',
+          preConfirm: () => selectedBadge
+        });
+
+        if (badge) {
+          await submitMatchFeedback(map, bans, p.hunter_name, badge === "none" ? "C" : badge);
+          $("#feedback-inline-box").html('<p class="text-center text-emerald-400 font-bold text-xs py-2">感謝您的配合與貢獻！</p>');
+        }
+      });
+
+      $("#f-no").on("click", async () => {
+        let selectedHunter = "";
+        let selectedBadge = "C"; // 預設
+
+        const hunterGridHtml = (window.allHunters || []).map(h => `
+          <div class="swal-char-card" data-name="${h.name}">
+            <img src="/static/images/char/${encodeURIComponent(h.name)}.png" onerror="this.src='https://placehold.co/100/1a1a1a/666?text=?'">
+            <div class="char-name">${h.name}</div>
+          </div>
+        `).join('');
+
+        const badgeRowHtml = `
+          <div class="badge-selection-row">
+            <div class="badge-item" data-badge="S" title="S級徽章"><img src="/static/images/badges/S.png"></div>
+            <div class="badge-item" data-badge="A" title="A級徽章"><img src="/static/images/badges/A.png"></div>
+            <div class="badge-item" data-badge="B" title="B級徽章"><img src="/static/images/badges/B.png"></div>
+            <div class="badge-item selected" data-badge="C" title="C級徽章"><img src="/static/images/badges/C.png"></div>
+            <div class="badge-item" data-badge="none" title="無徽章"><img src="/static/images/badges/none.png"></div>
+          </div>
+        `;
+
+        const { value: result } = await Swal.fire({
+          title: '手動更正數據',
+          html: `
+            <div class="text-left space-y-6">
+              <section>
+                <label class="text-[10px] uppercase font-black text-slate-500 mb-3 block">實際監管者 (1/1)</label>
+                <div id="swal-hunter-grid" class="swal-char-grid">${hunterGridHtml}</div>
+              </section>
+              <section>
+                <label class="text-[10px] uppercase font-black text-slate-500 mb-3 block">徽章等級 (1/1)</label>
+                ${badgeRowHtml}
+              </section>
+            </div>
+          `,
+          didOpen: () => {
+            const $grid = $("#swal-hunter-grid");
+            const $badges = $(".badge-item");
+            
+            $grid.on("click", ".swal-char-card", function() {
+              $(".swal-char-card").removeClass("selected");
+              $(this).addClass("selected");
+              selectedHunter = $(this).data("name");
             });
-            $("#f-no").on("click", async () => {
-                const hunterOptions = (window.allHunters || []).map(h => `<option value="${h.name}">${h.name}</option>`).join('');
-                const { value: formValues } = await Swal.fire({
-                  title: '手動更正數據',
-                  html: `
-                    <div class="text-left space-y-4">
-                      <div>
-                        <label class="text-[10px] uppercase font-black text-slate-500 mb-2 block">實際監管者</label>
-                        <select id="swal-hunter" class="swal2-select w-full m-0">${hunterOptions}</select>
-                      </div>
-                      <div>
-                        <label class="text-[10px] uppercase font-black text-slate-500 mb-2 block">徽章等級</label>
-                        <select id="swal-badge" class="swal2-select w-full m-0">
-                          <option value="">無 (或是 C 級以下)</option>
-                          <option value="S">S 級徽章</option>
-                          <option value="A">A 級徽章</option>
-                          <option value="B">B 級徽章</option>
-                          <option value="C">C 級徽章</option>
-                        </select>
-                      </div>
-                    </div>
-                  `,
-                  focusConfirm: false,
-                  showCancelButton: true,
-                  confirmButtonText: '提交更正',
-                  cancelButtonText: '取消',
-                  preConfirm: () => {
-                    return {
-                      hunter: document.getElementById('swal-hunter').value,
-                      badge: document.getElementById('swal-badge').value
-                    }
-                  }
-                });
-                
-                if (formValues && formValues.hunter) {
-                  await submitMatchFeedback(map, bans, formValues.hunter, formValues.badge || "C");
-                  $("#feedback-inline-box").html('<p class="text-center text-indigo-400 font-bold text-xs py-2">已提交更正，感謝您的貢獻！</p>');
-                }
+
+            $badges.on("click", function() {
+              $badges.removeClass("selected");
+              $(this).addClass("selected");
+              selectedBadge = $(this).data("badge");
             });
+          },
+          focusConfirm: false,
+          showCancelButton: true,
+          confirmButtonText: '提交更正',
+          cancelButtonText: '取消',
+          preConfirm: () => {
+            if (!selectedHunter) {
+              Swal.showValidationMessage('請選取一位監管者');
+              return false;
+            }
+            return { hunter: selectedHunter, badge: selectedBadge };
+          }
+        });
+        
+        if (result && result.hunter) {
+          await submitMatchFeedback(map, bans, result.hunter, result.badge === "none" ? "C" : result.badge);
+          $("#feedback-inline-box").html('<p class="text-center text-indigo-400 font-bold text-xs py-2">已提交更正，感謝您的貢獻！</p>');
         }
       });
     }
-  } catch(e) { console.error(e); }
+  });
 }
 
 async function loadInitialData(mapName = null) {

@@ -72,7 +72,7 @@
         <table class="w-full text-sm text-left">
           <thead>
             <tr class="bg-white/5 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-              <th class="px-6 py-4">Identity</th><th class="px-6 py-4">Auth</th><th class="px-6 py-4">Status</th><th class="px-6 py-4">Role</th><th class="px-6 py-4">Action</th>
+              <th class="px-6 py-4">Identity</th><th class="px-6 py-4">Auth</th><th class="px-6 py-4">Status</th><th class="px-6 py-4">Reputation</th><th class="px-6 py-4">Role</th><th class="px-6 py-4">Action</th>
             </tr>
           </thead>
           <tbody id="users-tbody" class="divide-y divide-white/5"></tbody>
@@ -105,7 +105,7 @@
           <div class="pt-6 border-t border-white/5">
             <p class="text-[10px] text-slate-500 mb-3 font-bold uppercase tracking-widest">數據維護</p>
             <button id="btn-fix-data" class="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-2xl transition-all text-xs border border-white/5">
-              修復歷史版本數據 (將 2024.12.30 轉為 Season 41)
+              修復版本數據 (將所有數據轉為當前版本)
             </button>
           </div>
         </div>
@@ -131,7 +131,10 @@
     <section id="panel-records" class="hidden space-y-6">
       <div class="flex items-center justify-between">
         <h2 class="text-3xl font-black text-white">戰績管理系統</h2>
-        <div class="flex gap-4">
+        <div class="flex gap-4 items-center">
+           <button id="btn-batch-verify" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black px-4 py-2 rounded-xl shadow-lg shadow-indigo-600/20 transition-all uppercase tracking-widest">
+             批量驗證選中項 (<span id="selected-count">0</span>)
+           </button>
            <select id="filter-map" class="bg-slate-900 border border-white/5 rounded-xl text-xs px-4 py-2 text-slate-300 focus:outline-none focus:border-indigo-500"></select>
            <select id="filter-hunter" class="bg-slate-900 border border-white/5 rounded-xl text-xs px-4 py-2 text-slate-300 focus:outline-none focus:border-indigo-500"></select>
         </div>
@@ -141,11 +144,15 @@
         <table class="w-full text-sm text-left">
           <thead>
             <tr class="bg-white/5">
+                <th class="px-6 py-4 w-10">
+                  <input type="checkbox" id="check-all-records" class="w-4 h-4 rounded border-white/10 bg-slate-800 accent-indigo-600" />
+                </th>
                 <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">地圖</th>
                 <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Bans</th>
-                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">監管者</th>
-                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">貢獻者</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">監管者 (勳章)</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">貢獻者 (信譽)</th>
                 <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">時間</th>
+                <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">驗證狀態</th>
                 <th class="px-6 py-4 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">操作</th>
             </tr>
           </thead>

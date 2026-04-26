@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.git/
+.wrangler/
+serviceAccountKey.json
+.env
+.env.example

@@ -10,6 +10,7 @@ class UserInfo(BaseModel):
     display_name: Optional[str] = None
     photo_url: Optional[str] = None
     role: str = "user"
+    reputation: int = 100
 
 class BanEntry(BaseModel):
     user_id: str
@@ -32,3 +33,7 @@ class MatchRecord(BaseModel):
     badge_level: str
     reported_at: str
     source: str
+    is_verified: int = 0
+
+class VersionUpdateRequest(BaseModel):
+    new_version: str

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS users (
     photo_url TEXT,
     role TEXT DEFAULT 'user',
     is_blacklisted INTEGER DEFAULT 0,
+    reputation INTEGER DEFAULT 100,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -78,10 +79,46 @@ CREATE TABLE IF NOT EXISTS banlist (
     banned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     is_active INTEGER DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS match_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    map_name TEXT NOT NULL,
+    ban_survivors TEXT NOT NULL,
+    hunter_name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    badge_level TEXT DEFAULT 'C',
+    is_verified INTEGER DEFAULT 0,
+    reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    source TEXT DEFAULT 'user_report',
+    added_by_uid TEXT,
+    added_by_name TEXT
+);
 """
 
 async def init_tables(request: Any = None):
+    # 1. 執行基礎建表 (CREATE TABLE IF NOT EXISTS)
     for statement in INIT_SQL.strip().split(";"):
         stmt = statement.strip()
         if stmt:
             await execute(stmt, request=request)
+    
+    # 2. 自動檢查並補齊缺失欄位 (Migrate v3.0)
+    print("🔍 正在檢查資料庫結構...")
+    
+    # 檢查 users 表是否缺少 reputation
+    user_cols = await query("PRAGMA table_info(users)", request=request)
+    has_reputation = any(c['name'] == 'reputation' for c in user_cols)
+    if not has_reputation:
+        print("🛠️ 正在自動補齊 users.reputation 欄位...")
+        await execute("ALTER TABLE users ADD COLUMN reputation INTEGER DEFAULT 100", request=request)
+        print("✅ users.reputation 修復完成")
+
+    # 檢查 match_records 表是否缺少 is_verified
+    record_cols = await query("PRAGMA table_info(match_records)", request=request)
+    has_verified = any(c['name'] == 'is_verified' for c in record_cols)
+    if not has_verified:
+        print("🛠️ 正在自動補齊 match_records.is_verified 欄位...")
+        await execute("ALTER TABLE match_records ADD COLUMN is_verified INTEGER DEFAULT 1", request=request)
+        print("✅ match_records.is_verified 修復完成")
+    
+    print("✨ 資料庫結構檢查完畢。")

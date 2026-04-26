@@ -22,9 +22,7 @@ export async function onRequestGet(context) {
       `).all()
     ]);
 
-    // 基於名稱合成頭像路徑 (優先使用中文名稱辨認)
     const getPortrait = (name) => {
-      // 編碼中文檔名以確保 URL 相容性 (例如 機械師.png -> %E6%A9%9F%E6%A2%B0%E5%B8%AB.png)
       const encodedName = encodeURIComponent(name);
       return { 
         name, 
@@ -33,25 +31,60 @@ export async function onRequestGet(context) {
       };
     };
 
-    const survivorsList = (survivorsRes.results || []).map(s => getPortrait(s.name));
-    const huntersList = (huntersRes.results || []).map(h => getPortrait(h.name));
+    let survivorsList = (survivorsRes.results || []).map(s => getPortrait(s.name));
+    let huntersList = (huntersRes.results || []).map(h => getPortrait(h.name));
+
+    const gC = { surv: {}, hunt: {} }; 
+    const mC = { surv: {}, hunt: {} };
 
     if (hotRecordsRes.results && hotRecordsRes.results.length > 0) {
-      const gC = {}; const mC = {};
       hotRecordsRes.results.forEach(r => {
         let bans = [];
         try { bans = JSON.parse(r.ban_survivors || "[]"); } 
         catch (e) { bans = (r.ban_survivors || "").split(",").map(b => b.trim()); }
+        
         bans.forEach(b => {
           if (!b) return;
-          gC[b] = (gC[b] || 0) + 1;
-          if (activeMapName && r.map_name === activeMapName) mC[b] = (mC[b] || 0) + 1;
+          gC.surv[b] = (gC.surv[b] || 0) + 1;
+          if (activeMapName && r.map_name === activeMapName) mC.surv[b] = (mC.surv[b] || 0) + 1;
         });
+
+        const hName = r.hunter_name;
+        if (hName) {
+          gC.hunt[hName] = (gC.hunt[hName] || 0) + 1;
+          if (activeMapName && r.map_name === activeMapName) mC.hunt[hName] = (mC.hunt[hName] || 0) + 1;
+        }
       });
-      const calculateHot = (countsMap) => Object.entries(countsMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name]) => name);
-      const hotNames = calculateHot(Object.values(mC).reduce((a, b) => a + b, 0) >= 2 ? mC : gC);
-      const sDict = {}; survivorsList.forEach(s => sDict[s.name] = s);
-      hotNames.forEach(name => { if (sDict[name]) sDict[name].is_hot = true; });
+
+      // 標註熱門標籤 (Top 5)
+      const markHot = (list, mCount, gCount) => {
+        const counts = Object.values(mCount).reduce((a, b) => a + b, 0) >= 2 ? mCount : gCount;
+        const hotNames = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n]) => n);
+        list.forEach(item => {
+          if (hotNames.includes(item.name)) item.is_hot = true;
+        });
+      };
+
+      markHot(survivorsList, mC.surv, gC.surv);
+      markHot(huntersList, mC.hunt, gC.hunt);
+
+      // 實作排序：本地圖次數 > 全局次數 > 名稱 (ASC)
+      const sortList = (list, mCount, gCount) => {
+        return list.sort((a, b) => {
+          const ma = mCount[a.name] || 0;
+          const mb = mCount[b.name] || 0;
+          if (ma !== mb) return mb - ma;
+          
+          const ga = gCount[a.name] || 0;
+          const gb = gCount[b.name] || 0;
+          if (ga !== gb) return gb - ga;
+          
+          return a.name.localeCompare(b.name, "zh-Hant");
+        });
+      };
+
+      survivorsList = sortList(survivorsList, mC.surv, gC.surv);
+      huntersList = sortList(huntersList, mC.hunt, gC.hunt);
     }
 
     return new Response(JSON.stringify({
